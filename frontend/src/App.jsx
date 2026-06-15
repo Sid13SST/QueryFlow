@@ -72,6 +72,7 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [hoveredNodeId, setHoveredNodeId] = useState(null);
   const [searchTrigger, setSearchTrigger] = useState(null);
+  const [batchInfo, setBatchInfo] = useState(null);
 
   const checkHealth = async () => {
     setIsHealthLoading(true);
@@ -105,14 +106,18 @@ function App() {
     if (showLoader) setIsCacheLoading(true);
     setCacheError(null);
     try {
-      const [statsRes, ringRes, distRes] = await Promise.all([
+      const [statsRes, ringRes, distRes, batchRes] = await Promise.all([
         axiosClient.get('/cache/stats'),
         axiosClient.get('/cache/ring'),
-        axiosClient.get('/cache/distribution')
+        axiosClient.get('/cache/distribution'),
+        axiosClient.get('/batch/status').catch(() => ({ data: null }))
       ]);
       setCacheInfo(statsRes.data);
       setRingInfo(ringRes.data);
       setDistInfo(distRes.data);
+      if (batchRes && batchRes.data) {
+        setBatchInfo(batchRes.data);
+      }
     } catch (error) {
       setCacheError(error.message || 'Failed to fetch cache stats');
     } finally {
@@ -293,6 +298,27 @@ function App() {
                     <p className="text-xs text-rose-500/60 leading-relaxed font-mono mt-1 break-all">
                       Error Details: {healthError}
                     </p>
+                  </div>
+                )}
+
+                {/* Write Buffer Status */}
+                {batchInfo && (
+                  <div className="mt-4 p-4 rounded-2xl bg-slate-950/40 border border-slate-850/40 text-xs text-slate-400 space-y-2 animate-fadeIn">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Write Buffer Status</div>
+                    <div className="flex justify-between">
+                      <span>Pending Events:</span>
+                      <span className="font-mono text-indigo-400 font-semibold">{batchInfo.pendingEvents}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Buffered Entries:</span>
+                      <span className="font-mono text-indigo-400 font-semibold">{batchInfo.pendingEntries}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Last Flush:</span>
+                      <span className="font-mono text-slate-300 font-semibold">
+                        {batchInfo.lastFlushTime ? new Date(batchInfo.lastFlushTime).toLocaleTimeString() : 'Never'}
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
