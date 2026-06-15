@@ -23,6 +23,9 @@ public class BatchWriterService {
     @Autowired
     private SearchQueryRepository searchQueryRepository;
 
+    @Autowired
+    private CacheInvalidationService cacheInvalidationService;
+
     private LocalDateTime lastFlushTime;
 
     @Scheduled(fixedDelayString = "${queryflow.batch.flush-interval-seconds:30}", timeUnit = TimeUnit.SECONDS)
@@ -43,6 +46,14 @@ public class BatchWriterService {
         try {
             // Persist the batch transactionally
             persistBatch(snapshot);
+            
+            // Invalidate affected cache entries ONLY after successful DB update
+            try {
+                cacheInvalidationService.invalidateQueries(snapshot.keySet());
+                cacheInvalidationService.invalidateTrending();
+            } catch (Exception e) {
+                log.warn("Cache invalidation encountered an error but processing will continue: {}", e.getMessage());
+            }
             
             long duration = System.currentTimeMillis() - startTime;
             log.info("Batch flush completed. Entries={} Events={} Duration={}ms", entriesCount, eventsCount, duration);
