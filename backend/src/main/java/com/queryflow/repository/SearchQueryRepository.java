@@ -4,6 +4,7 @@ import com.queryflow.entity.SearchQuery;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+import org.springframework.data.domain.Pageable;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,4 +22,8 @@ public interface SearchQueryRepository extends JpaRepository<SearchQuery, Long> 
      * WHERE LOWER(query) LIKE LOWER(prefix || '%') ORDER BY count DESC LIMIT 10
      */
     List<SearchQuery> findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc(String prefix);
+
+    @Query("SELECT s FROM SearchQuery s ORDER BY s.count DESC")
+    List<SearchQuery> findTopTrending(Pageable pageable);
 }
+
