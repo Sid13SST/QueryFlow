@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axiosClient from '../api/axiosClient';
 
-export default function SearchBox() {
+export default function SearchBox({ trigger }) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -74,6 +74,14 @@ export default function SearchBox() {
       setIsSearching(false);
     }
   };
+
+  useEffect(() => {
+    if (trigger && trigger.query) {
+      setQuery(trigger.query);
+      setShowDropdown(false);
+      submitSearch(trigger.query);
+    }
+  }, [trigger]);
 
   const handleSelectSuggestion = (value) => {
     setQuery(value);

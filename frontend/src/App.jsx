@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axiosClient from './api/axiosClient';
 import SearchBox from './components/SearchBox';
+import TrendingSearches from './components/TrendingSearches';
 import logo from './assets/logo.svg';
 
 const vNodeCount = 30;
@@ -70,6 +71,7 @@ function App() {
 
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [hoveredNodeId, setHoveredNodeId] = useState(null);
+  const [searchTrigger, setSearchTrigger] = useState(null);
 
   const checkHealth = async () => {
     setIsHealthLoading(true);
@@ -230,7 +232,8 @@ function App() {
 
           {/* Search Box Component */}
           <div className="py-2 max-w-xl mx-auto w-full">
-            <SearchBox />
+            <SearchBox trigger={searchTrigger} />
+            <TrendingSearches onSelect={(q) => setSearchTrigger({ query: q, timestamp: Date.now() })} />
           </div>
 
           {/* System Control Cards */}
