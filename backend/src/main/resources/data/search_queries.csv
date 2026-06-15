@@ -1,0 +1,15 @@
+query,count
+iphone,100000
+iphone 15,80000
+java,50000
+python,45000
+react,35000
+typescript,30000
+spring boot,25000
+docker,20000
+kubernetes,15000
+postgresql,12000
+,9999
+invalid_count,abc
+duplicate_query,100
+duplicate_query,200
