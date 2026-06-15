@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: queryflow-redis-node-1
+    ports:
+      - "6379:6379"
+
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: queryflow-redis-node-2
+    ports:
+      - "6380:6379"
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: queryflow-redis-node-3
+    ports:
+      - "6381:6379"
