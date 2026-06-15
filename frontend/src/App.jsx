@@ -13,6 +13,8 @@ function App() {
   const [isStatsLoading, setIsStatsLoading] = useState(false);
 
   const [cacheInfo, setCacheInfo] = useState(null);
+  const [ringInfo, setRingInfo] = useState(null);
+  const [distInfo, setDistInfo] = useState(null);
   const [cacheError, setCacheError] = useState(null);
   const [isCacheLoading, setIsCacheLoading] = useState(false);
 
@@ -46,11 +48,16 @@ function App() {
 
   const fetchCacheStats = async () => {
     setIsCacheLoading(true);
-    setCacheInfo(null);
     setCacheError(null);
     try {
-      const response = await axiosClient.get('/cache/stats');
-      setCacheInfo(response.data);
+      const [statsRes, ringRes, distRes] = await Promise.all([
+        axiosClient.get('/cache/stats'),
+        axiosClient.get('/cache/ring'),
+        axiosClient.get('/cache/distribution')
+      ]);
+      setCacheInfo(statsRes.data);
+      setRingInfo(ringRes.data);
+      setDistInfo(distRes.data);
     } catch (error) {
       setCacheError(error.message || 'Failed to fetch cache stats');
     } finally {
@@ -87,7 +94,7 @@ function App() {
         <div className="flex items-center gap-4 text-sm text-slate-400">
           <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            Phase 4 Caching
+            Phase 5 Hashing
           </span>
         </div>
       </header>
@@ -283,7 +290,7 @@ function App() {
                     Fetching stats...
                   </div>
                 ) : cacheInfo ? (
-                  <div className="space-y-3">
+                  <div className="space-y-3.5">
                     <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between shadow-inner">
                       <div>
                         <span className="text-[10px] text-slate-500 block uppercase tracking-wider font-semibold">Hit Rate</span>
@@ -308,6 +315,35 @@ function App() {
                         <span className="font-semibold text-rose-400 font-mono">{cacheInfo.misses}</span>
                       </div>
                     </div>
+
+                    {ringInfo && (
+                      <div className="pt-3 border-t border-slate-800/60 flex justify-between text-[11px] text-slate-400">
+                        <span>Physical Nodes: <strong className="text-slate-200">{ringInfo.totalNodes}</strong></span>
+                        <span>Virtual Nodes: <strong className="text-slate-200">{ringInfo.virtualNodes}</strong></span>
+                      </div>
+                    )}
+
+                    {distInfo && (
+                      <div className="pt-3 border-t border-slate-800/60 space-y-2">
+                        <span className="text-[10px] text-slate-500 block uppercase tracking-wider font-semibold">Node Key Distribution</span>
+                        <div className="space-y-1.5">
+                          {Object.entries(distInfo).map(([nodeId, count]) => {
+                            const isOffline = count < 0;
+                            return (
+                              <div key={nodeId} className="flex justify-between items-center text-xs p-2 rounded bg-slate-950/60 border border-slate-800/40">
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${isOffline ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
+                                  <span className="text-slate-300 font-mono text-[11px]">{nodeId}</span>
+                                </div>
+                                <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${isOffline ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-slate-900 text-slate-400 border border-slate-800'}`}>
+                                  {isOffline ? 'OFFLINE' : `${count} keys`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : cacheError ? (
                   <div className="p-4 rounded-xl bg-rose-500/5 border border-rose-500/10 text-rose-400 text-left text-sm">
