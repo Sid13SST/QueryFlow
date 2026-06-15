@@ -9,8 +9,11 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class TrendingResponse {
+public class TrendingExplainResponse {
     private String query;
     private Long count;
-    private Double score;
+    private Double hoursSinceLastSearch;
+    private Double popularityScore;
+    private Double recencyScore;
+    private Double finalScore;
 }
