@@ -7,6 +7,10 @@ export default function SearchBox() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
+  
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchFeedback, setSearchFeedback] = useState('');
+  
   const containerRef = useRef(null);
 
   // Close dropdown on click outside
@@ -50,9 +54,38 @@ export default function SearchBox() {
     return () => clearTimeout(delayDebounceFn);
   }, [query]);
 
+  // Submit search request
+  const submitSearch = async (value) => {
+    const trimmedVal = value.trim();
+    if (trimmedVal === '') return;
+
+    setIsSearching(true);
+    setSearchFeedback('Searching...');
+    
+    try {
+      await axiosClient.post('/search', { query: trimmedVal });
+      setSearchFeedback('Search recorded');
+      setTimeout(() => setSearchFeedback(''), 2500); // Clear feedback after 2.5s
+    } catch (err) {
+      console.error('Error submitting search:', err);
+      setSearchFeedback('Failed to record search');
+      setTimeout(() => setSearchFeedback(''), 3000);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   const handleSelectSuggestion = (value) => {
     setQuery(value);
     setShowDropdown(false);
+    submitSearch(value);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      setShowDropdown(false);
+      submitSearch(query);
+    }
   };
 
   return (
@@ -65,9 +98,11 @@ export default function SearchBox() {
             setQuery(e.target.value);
             setShowDropdown(true);
           }}
+          onKeyDown={handleKeyDown}
           placeholder="Start typing to search (e.g. iphone, java)..."
           className="w-full py-4.5 pl-12 pr-12 rounded-2xl bg-slate-900/80 border border-slate-800 focus:border-indigo-500/80 focus:ring-2 focus:ring-indigo-500/20 text-slate-100 placeholder-slate-500 outline-none transition-all duration-300 shadow-xl backdrop-blur-md text-base"
           onFocus={() => setShowDropdown(true)}
+          disabled={isSearching}
         />
         
         {/* Search Icon */}
@@ -101,8 +136,30 @@ export default function SearchBox() {
         </div>
       </div>
 
+      {/* Search Feedback Indicator */}
+      {searchFeedback && (
+        <div className="absolute right-2.5 -bottom-7 flex items-center gap-1.5 text-[10px] font-semibold tracking-wide uppercase px-2.5 py-0.5 rounded-full border border-slate-800/80 bg-slate-900/90 shadow-lg animate-fadeIn z-20">
+          <span className={`w-1.5 h-1.5 rounded-full ${
+            searchFeedback === 'Searching...' 
+              ? 'bg-amber-500 animate-pulse' 
+              : searchFeedback === 'Search recorded' 
+                ? 'bg-emerald-500' 
+                : 'bg-rose-500'
+          }`} />
+          <span className={
+            searchFeedback === 'Searching...' 
+              ? 'text-amber-400' 
+              : searchFeedback === 'Search recorded' 
+                ? 'text-emerald-400' 
+                : 'text-rose-400'
+          }>
+            {searchFeedback}
+          </span>
+        </div>
+      )}
+
       {/* Suggestions Dropdown */}
-      {showDropdown && query.trim() !== '' && (
+      {showDropdown && query.trim() !== '' && !isSearching && (
         <div className="absolute left-0 right-0 mt-2 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden backdrop-blur-xl animate-fadeIn z-30">
           
           {/* Suggestions List */}
@@ -133,7 +190,7 @@ export default function SearchBox() {
           {/* Empty State */}
           {!isLoading && suggestions.length === 0 && !errorMsg && (
             <div className="px-5 py-6 text-center text-slate-500 text-sm">
-              No matching suggestions found.
+              No matching suggestions found. Press Enter to submit custom search.
             </div>
           )}
 
