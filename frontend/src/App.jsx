@@ -73,6 +73,7 @@ function App() {
   const [hoveredNodeId, setHoveredNodeId] = useState(null);
   const [searchTrigger, setSearchTrigger] = useState(null);
   const [batchInfo, setBatchInfo] = useState(null);
+  const [invalidationInfo, setInvalidationInfo] = useState(null);
 
   const checkHealth = async () => {
     setIsHealthLoading(true);
@@ -106,17 +107,21 @@ function App() {
     if (showLoader) setIsCacheLoading(true);
     setCacheError(null);
     try {
-      const [statsRes, ringRes, distRes, batchRes] = await Promise.all([
+      const [statsRes, ringRes, distRes, batchRes, invalidationRes] = await Promise.all([
         axiosClient.get('/cache/stats'),
         axiosClient.get('/cache/ring'),
         axiosClient.get('/cache/distribution'),
-        axiosClient.get('/batch/status').catch(() => ({ data: null }))
+        axiosClient.get('/batch/status').catch(() => ({ data: null })),
+        axiosClient.get('/cache/invalidation/stats').catch(() => ({ data: null }))
       ]);
       setCacheInfo(statsRes.data);
       setRingInfo(ringRes.data);
       setDistInfo(distRes.data);
       if (batchRes && batchRes.data) {
         setBatchInfo(batchRes.data);
+      }
+      if (invalidationRes && invalidationRes.data) {
+        setInvalidationInfo(invalidationRes.data);
       }
     } catch (error) {
       setCacheError(error.message || 'Failed to fetch cache stats');
@@ -317,6 +322,22 @@ function App() {
                       <span>Last Flush:</span>
                       <span className="font-mono text-slate-300 font-semibold">
                         {batchInfo.lastFlushTime ? new Date(batchInfo.lastFlushTime).toLocaleTimeString() : 'Never'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {/* Cache Invalidation Stats */}
+                {invalidationInfo && (
+                  <div className="mt-3 p-4 rounded-2xl bg-slate-950/40 border border-slate-850/40 text-xs text-slate-400 space-y-2 animate-fadeIn">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Cache Invalidation</div>
+                    <div className="flex justify-between">
+                      <span>Invalidation Events:</span>
+                      <span className="font-mono text-indigo-400 font-semibold">{invalidationInfo.invalidations}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Last Invalidation:</span>
+                      <span className="font-mono text-slate-300 font-semibold">
+                        {invalidationInfo.lastInvalidationTime ? new Date(invalidationInfo.lastInvalidationTime).toLocaleTimeString() : 'Never'}
                       </span>
                     </div>
                   </div>
