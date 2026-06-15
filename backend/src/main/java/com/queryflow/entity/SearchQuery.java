@@ -4,6 +4,19 @@ import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
 
+/**
+ * Recommendation for Database Indexing:
+ * For optimal performance of autocomplete prefix queries under high load,
+ * we recommend creating a functional index on the search_queries table:
+ * 
+ * CREATE INDEX idx_search_queries_query_lower ON search_queries(LOWER(query));
+ * 
+ * Why:
+ * The suggestion engine runs case-insensitive queries using "LOWER(query) LIKE LOWER(prefix || '%')".
+ * A standard B-Tree index on 'query' is not utilized during LOWER() calculations. Creating a
+ * functional index on LOWER(query) ensures the database can perform an index scan, keeping
+ * response latency minimal even with 100k+ records.
+ */
 @Entity
 @Table(name = "search_queries")
 @Getter
