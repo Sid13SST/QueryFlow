@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axiosClient from './api/axiosClient';
+import SearchBox from './components/SearchBox';
 
 function App() {
   const [healthInfo, setHealthInfo] = useState(null);
@@ -64,14 +65,14 @@ function App() {
         <div className="flex items-center gap-4 text-sm text-slate-400">
           <span className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            Phase 1 Storage
+            Phase 2 Suggestions
           </span>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center px-6 py-12 z-10">
-        <div className="w-full max-w-4xl text-center space-y-8">
+        <div className="w-full max-w-4xl text-center space-y-10">
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-medium tracking-wide">
             Distributed Search Typeahead System
@@ -85,6 +86,11 @@ function App() {
             <p className="text-lg md:text-xl text-slate-400 max-w-xl mx-auto font-light leading-relaxed">
               High-performance query auto-suggestions backed by consistent hashing, caching, and batch write pipeline optimization.
             </p>
+          </div>
+
+          {/* Search Box Component */}
+          <div className="py-2">
+            <SearchBox />
           </div>
 
           {/* Action Cards Container */}
