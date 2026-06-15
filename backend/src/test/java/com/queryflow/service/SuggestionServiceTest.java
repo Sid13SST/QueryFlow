@@ -1,5 +1,6 @@
 package com.queryflow.service;
 
+import com.queryflow.dto.CacheNode;
 import com.queryflow.dto.SuggestionResponse;
 import com.queryflow.entity.SearchQuery;
 import com.queryflow.repository.SearchQueryRepository;
@@ -25,6 +26,9 @@ class SuggestionServiceTest {
     private SearchQueryRepository searchQueryRepository;
 
     @Mock
+    private ConsistentHashService consistentHashService;
+
+    @Mock
     private RedisTemplate<String, Object> redisTemplate;
 
     @Mock
@@ -36,63 +40,90 @@ class SuggestionServiceTest {
     @InjectMocks
     private SuggestionService suggestionService;
 
+    private CacheNode mockNode;
+
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        
+        mockNode = CacheNode.builder()
+                .nodeId("redis-node-1")
+                .host("localhost")
+                .port(6379)
+                .redisTemplate(redisTemplate)
+                .build();
     }
 
     @Test
     void testCacheHitPath() {
-        // Prepare cached data
+        // Arrange
         List<SuggestionResponse> cachedSuggestions = Arrays.asList(
                 new SuggestionResponse("iphone 15", 100000L),
                 new SuggestionResponse("iphone 14", 80000L)
         );
         
+        when(consistentHashService.route("suggest:iphone")).thenReturn(mockNode);
         when(valueOperations.get("suggest:iphone")).thenReturn(cachedSuggestions);
 
-        // Call method
+        // Act
         List<SuggestionResponse> results = suggestionService.getSuggestions("iphone");
 
-        // Verify
+        // Assert
         assertEquals(2, results.size());
         assertEquals("iphone 15", results.get(0).getQuery());
         assertEquals("iphone 14", results.get(1).getQuery());
 
-        // Verify database is NOT queried
+        verify(consistentHashService, times(1)).route("suggest:iphone");
         verify(searchQueryRepository, never()).findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc(anyString());
-        
-        // Verify metric hit is incremented
         verify(cacheMetricsService, times(1)).incrementHits();
         verify(cacheMetricsService, never()).incrementMisses();
     }
 
     @Test
     void testCacheMissPath() {
-        // Cache misses
+        // Arrange
+        when(consistentHashService.route("suggest:iphone")).thenReturn(mockNode);
         when(valueOperations.get("suggest:iphone")).thenReturn(null);
 
-        // Prepare database data
         SearchQuery q1 = SearchQuery.builder().query("iphone 15").count(100000L).build();
-        SearchQuery q2 = SearchQuery.builder().query("iphone 14").count(80000L).build();
         when(searchQueryRepository.findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc("iphone"))
-                .thenReturn(Arrays.asList(q1, q2));
+                .thenReturn(Collections.singletonList(q1));
 
-        // Call method
+        // Act
         List<SuggestionResponse> results = suggestionService.getSuggestions("iphone");
 
-        // Verify results
-        assertEquals(2, results.size());
+        // Assert
+        assertEquals(1, results.size());
         assertEquals("iphone 15", results.get(0).getQuery());
         
-        // Verify database IS queried
+        verify(consistentHashService, times(1)).route("suggest:iphone");
         verify(searchQueryRepository, times(1)).findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc("iphone");
-        
-        // Verify metric miss is incremented and data is stored
         verify(cacheMetricsService, times(1)).incrementMisses();
         verify(cacheMetricsService, never()).incrementHits();
         verify(valueOperations, times(1)).set(eq("suggest:iphone"), anyList(), eq(5L), eq(TimeUnit.MINUTES));
+    }
+
+    @Test
+    void testNodeFailureFallback() {
+        // Arrange
+        when(consistentHashService.route("suggest:iphone")).thenReturn(mockNode);
+        // Simulate Redis connection failure
+        when(valueOperations.get("suggest:iphone")).thenThrow(new RuntimeException("Redis connection lost"));
+
+        SearchQuery q1 = SearchQuery.builder().query("iphone 15").count(100000L).build();
+        when(searchQueryRepository.findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc("iphone"))
+                .thenReturn(Collections.singletonList(q1));
+
+        // Act - should NOT crash and fallback to DB
+        List<SuggestionResponse> results = suggestionService.getSuggestions("iphone");
+
+        // Assert
+        assertEquals(1, results.size());
+        assertEquals("iphone 15", results.get(0).getQuery());
+        
+        verify(searchQueryRepository, times(1)).findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc("iphone");
+        verify(cacheMetricsService, times(1)).incrementMisses();
     }
 
     @Test
@@ -104,18 +135,22 @@ class SuggestionServiceTest {
 
     @Test
     void testCaseInsensitiveSearch() {
-        // Mock cache miss
+        // Arrange
+        when(consistentHashService.route("suggest:java")).thenReturn(mockNode);
         when(valueOperations.get("suggest:java")).thenReturn(null);
 
         SearchQuery q1 = SearchQuery.builder().query("Java").count(50000L).build();
         when(searchQueryRepository.findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc("java"))
                 .thenReturn(Collections.singletonList(q1));
 
+        // Act
         List<SuggestionResponse> results = suggestionService.getSuggestions("jAvA");
 
+        // Assert
         assertEquals(1, results.size());
         assertEquals("Java", results.get(0).getQuery());
         verify(searchQueryRepository, times(1)).findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc("java");
     }
 }
+
 
