@@ -68,7 +68,7 @@ export default function TrendingSearches({ onSelect }) {
               </span>
               {!loading && (
                 <span className="text-[9px] font-mono text-slate-600 group-hover:text-indigo-500/70 transition-colors">
-                  ({item.count.toLocaleString()})
+                  ({item.score !== undefined && item.score !== null ? item.score.toFixed(2) : item.count.toLocaleString()})
                 </span>
               )}
             </button>
