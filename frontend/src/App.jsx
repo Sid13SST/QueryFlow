@@ -12,6 +12,10 @@ function App() {
   const [statsError, setStatsError] = useState(null);
   const [isStatsLoading, setIsStatsLoading] = useState(false);
 
+  const [cacheInfo, setCacheInfo] = useState(null);
+  const [cacheError, setCacheError] = useState(null);
+  const [isCacheLoading, setIsCacheLoading] = useState(false);
+
   const checkHealth = async () => {
     setIsHealthLoading(true);
     setHealthInfo(null);
@@ -40,9 +44,24 @@ function App() {
     }
   };
 
+  const fetchCacheStats = async () => {
+    setIsCacheLoading(true);
+    setCacheInfo(null);
+    setCacheError(null);
+    try {
+      const response = await axiosClient.get('/cache/stats');
+      setCacheInfo(response.data);
+    } catch (error) {
+      setCacheError(error.message || 'Failed to fetch cache stats');
+    } finally {
+      setIsCacheLoading(false);
+    }
+  };
+
   // Fetch stats on load
   useEffect(() => {
     fetchStats();
+    fetchCacheStats();
   }, []);
 
   return (
@@ -68,7 +87,7 @@ function App() {
         <div className="flex items-center gap-4 text-sm text-slate-400">
           <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            Phase 2 Suggestions
+            Phase 4 Caching
           </span>
         </div>
       </header>
@@ -113,7 +132,7 @@ function App() {
           </div>
 
           {/* Action Cards Container */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto w-full relative pt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto w-full relative pt-6">
             
             {/* Health Card */}
             <div className="p-8 rounded-3xl bg-slate-900/20 border border-slate-800/60 backdrop-blur-xl shadow-2xl flex flex-col justify-between text-left hover:border-slate-700/60 transition-colors duration-300">
@@ -230,6 +249,74 @@ function App() {
                 ) : (
                   <div className="h-24 flex items-center justify-center text-slate-500 text-sm">
                     No statistics data available.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Cache Stats Card */}
+            <div className="p-8 rounded-3xl bg-slate-900/20 border border-slate-800/60 backdrop-blur-xl shadow-2xl flex flex-col justify-between text-left hover:border-slate-700/60 transition-colors duration-300">
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-bold text-slate-200">Cache Performance</h3>
+                  <button 
+                    onClick={fetchCacheStats}
+                    disabled={isCacheLoading}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors cursor-pointer"
+                    title="Refresh cache stats"
+                  >
+                    <svg className={`h-4.5 w-4.5 ${isCacheLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3m-3-3v12" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="text-sm text-slate-400 font-light">Real-time Redis cache lookup performance statistics and hit rate tracking.</p>
+              </div>
+
+              <div className="space-y-4 mt-6">
+                {isCacheLoading ? (
+                  <div className="h-24 flex items-center justify-center text-slate-500 text-sm">
+                    <svg className="animate-spin h-5 w-5 text-indigo-400 mr-2" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Fetching stats...
+                  </div>
+                ) : cacheInfo ? (
+                  <div className="space-y-3">
+                    <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between shadow-inner">
+                      <div>
+                        <span className="text-[10px] text-slate-500 block uppercase tracking-wider font-semibold">Hit Rate</span>
+                        <span className="text-3xl font-black text-indigo-400 mt-1 block">
+                          {cacheInfo.hitRate}%
+                        </span>
+                      </div>
+                      <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shadow-md">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="p-3.5 rounded-xl bg-slate-950/45 border border-slate-800/80 flex justify-between items-center">
+                        <span className="text-slate-500">Hits</span>
+                        <span className="font-semibold text-emerald-400 font-mono">{cacheInfo.hits}</span>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-slate-950/45 border border-slate-800/80 flex justify-between items-center">
+                        <span className="text-slate-500">Misses</span>
+                        <span className="font-semibold text-rose-400 font-mono">{cacheInfo.misses}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : cacheError ? (
+                  <div className="p-4 rounded-xl bg-rose-500/5 border border-rose-500/10 text-rose-400 text-left text-sm">
+                    <div className="font-semibold text-xs uppercase tracking-wide">Failed to fetch stats</div>
+                    <p className="text-xs text-rose-500/60 mt-1.5 leading-relaxed">{cacheError}</p>
+                  </div>
+                ) : (
+                  <div className="h-24 flex items-center justify-center text-slate-500 text-sm">
+                    No cache statistics available.
                   </div>
                 )}
               </div>
