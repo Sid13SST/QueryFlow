@@ -214,12 +214,6 @@ function App() {
             QueryFlow
           </span>
         </div>
-        <div className="flex items-center gap-4 text-sm text-slate-400">
-          <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs font-sans">
-            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            Phase 5 Hashing
-          </span>
-        </div>
       </header>
 
       {/* Main Content */}
