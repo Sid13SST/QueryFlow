@@ -27,10 +27,14 @@ class BatchWriteSystemTest {
     void setUp() {
         searchQueryRepository = mock(SearchQueryRepository.class);
         searchBufferService = new SearchBufferService();
+        CacheInvalidationService cacheInvalidationService = mock(CacheInvalidationService.class);
+        MetricsService metricsService = mock(MetricsService.class);
         
         batchWriterService = new BatchWriterService();
         ReflectionTestUtils.setField(batchWriterService, "searchBufferService", searchBufferService);
         ReflectionTestUtils.setField(batchWriterService, "searchQueryRepository", searchQueryRepository);
+        ReflectionTestUtils.setField(batchWriterService, "cacheInvalidationService", cacheInvalidationService);
+        ReflectionTestUtils.setField(batchWriterService, "metricsService", metricsService);
 
         batchController = new BatchController();
         ReflectionTestUtils.setField(batchController, "searchBufferService", searchBufferService);

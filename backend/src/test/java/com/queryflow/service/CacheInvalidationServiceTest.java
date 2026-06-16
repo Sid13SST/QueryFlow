@@ -128,9 +128,11 @@ class CacheInvalidationServiceTest {
         CacheInvalidationService mockInvalidationService = mock(CacheInvalidationService.class);
 
         BatchWriterService writerService = new BatchWriterService();
+        MetricsService mockMetricsService = mock(MetricsService.class);
         ReflectionTestUtils.setField(writerService, "searchBufferService", bufferService);
         ReflectionTestUtils.setField(writerService, "searchQueryRepository", repository);
         ReflectionTestUtils.setField(writerService, "cacheInvalidationService", mockInvalidationService);
+        ReflectionTestUtils.setField(writerService, "metricsService", mockMetricsService);
 
         // Put search in buffer
         bufferService.increment("iphone");

@@ -37,6 +37,9 @@ class SuggestionServiceTest {
     @Mock
     private CacheMetricsService cacheMetricsService;
 
+    @Mock
+    private MetricsService metricsService;
+
     @InjectMocks
     private SuggestionService suggestionService;
 

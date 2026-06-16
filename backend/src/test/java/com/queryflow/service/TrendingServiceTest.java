@@ -37,6 +37,9 @@ class TrendingServiceTest {
     @Mock
     private CacheMetricsService cacheMetricsService;
 
+    @Mock
+    private MetricsService metricsService;
+
     private TrendingScoreService trendingScoreService;
 
     private TrendingService trendingService;
@@ -67,6 +70,7 @@ class TrendingServiceTest {
         ReflectionTestUtils.setField(trendingService, "consistentHashService", consistentHashService);
         ReflectionTestUtils.setField(trendingService, "cacheMetricsService", cacheMetricsService);
         ReflectionTestUtils.setField(trendingService, "trendingScoreService", trendingScoreService);
+        ReflectionTestUtils.setField(trendingService, "metricsService", metricsService);
     }
 
     @Test

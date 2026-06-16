@@ -14,6 +14,9 @@ class SearchServiceTest {
     @Mock
     private SearchBufferService searchBufferService;
 
+    @Mock
+    private MetricsService metricsService;
+
     @InjectMocks
     private SearchService searchService;
 
