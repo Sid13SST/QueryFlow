@@ -1,27 +1,65 @@
 # QueryFlow
 
-QueryFlow is a high-performance distributed search typeahead system designed to deliver real-time query suggestions. The system leverages consistent hashing, caching, trending analytics, and batch-write optimization to handle high-throughput read/write search traffic efficiently.
+QueryFlow is a high-performance distributed search typeahead system that delivers real-time autocomplete suggestions and trending search rankings. It combines distributed Redis caching with consistent hashing, in-memory batch write aggregation, popularity–recency trending algorithms, and active cache invalidation to handle high-throughput search traffic efficiently.
 
-This workspace contains **Phase 0: Project Setup & Architecture Foundation**, establishing the boilerplate, basic health check endpoints, centralized API clients, global exception handling, and layout configuration.
+---
+
+## Features
+
+| Phase | Feature | Description |
+|---|---|---|
+| 0 | Project Setup | Spring Boot + React (Vite) boilerplate, health check, global exception handling |
+| 1 | Dataset Loading | CSV dataset auto-loading into PostgreSQL on startup |
+| 2 | Suggestion API | Prefix-based autocomplete with case-insensitive matching |
+| 3 | Search Submission | POST /search endpoint with count tracking |
+| 4 | Redis Cache | Single-node Redis caching for suggestions |
+| 5 | Distributed Cache | 3-node Redis cluster with consistent hashing & virtual nodes |
+| 6 | Trending Searches | Top trending queries by search count |
+| 7 | Batch Writes | In-memory buffer + scheduled flush to reduce DB write load by ~97% |
+| 8 | Advanced Trending | Popularity + recency decay scoring with configurable weights |
+| 9 | Cache Invalidation | Active prefix-based invalidation after batch flushes |
+| 10 | Metrics & Observability | Real-time metrics dashboard, latency tracking, benchmark reports |
+
+---
+
+## Architecture Overview
+
+```text
+       Search Submissions               Autocomplete / Suggestions
+               │                                     │
+               ▼                                     ▼
+         [Search API]                        [Suggestion API]
+               │                                     │
+               ▼                                     ▼
+      [In-Memory Buffer]                    [Consistent Hash Ring]
+               │                                 /   │   \
+         (30s Delay)                            /    │    \
+               ▼                               ▼     ▼     ▼
+       [Batch Flusher]                    [Node 1] [Node 2] [Node 3] (Redis)
+         /          \                         \      │      /
+        /            \                         \     │     / (Cache Misses)
+       ▼              ▼                         ▼    ▼    ▼
+[PostgreSQL] ──► [Cache Invalidator] ────────► [Targeted Key Eviction]
+```
 
 ---
 
 ## Tech Stack
 
 ### Backend
-* **Java 17**
-* **Spring Boot 3** (Maven)
-* **Spring Data JPA**
-* **PostgreSQL Driver**
-* **Lombok**
+* **Java 23** with **Spring Boot 3** (Maven)
+* **Spring Data JPA** + **PostgreSQL**
+* **Spring Data Redis** (3-node distributed cache)
+* **Lombok** for boilerplate reduction
 
 ### Frontend
-* **React (Vite)**
+* **React 18** (Vite)
 * **Axios** (Centralized API client)
-* **Tailwind CSS v4** (Utility-first styling with modern PostCSS pipeline)
+* **Tailwind CSS v4**
 
-### Database
-* **PostgreSQL**
+### Infrastructure
+* **PostgreSQL** — Persistent storage
+* **Redis** × 3 — Distributed cache nodes (ports 6379, 6380, 6381)
 
 ---
 
@@ -31,114 +69,169 @@ This workspace contains **Phase 0: Project Setup & Architecture Foundation**, es
 QueryFlow/
 ├── backend/
 │   ├── src/main/java/com/queryflow/
-│   │   ├── config/            # Exception handlers, db loggers, spring configs
-│   │   ├── controller/        # Rest APIs (e.g. /health)
-│   │   ├── dto/               # Data Transfer Objects (ApiResponse, ErrorResponse)
+│   │   ├── config/            # Redis config, CORS, exception handlers
+│   │   ├── controller/        # REST endpoints (12 controllers)
+│   │   ├── dto/               # Response DTOs (16 classes)
+│   │   ├── entity/            # JPA entities (SearchQuery)
+│   │   ├── repository/        # Spring Data repositories
+│   │   ├── service/           # Business logic (12 services)
 │   │   └── QueryFlowApplication.java
-│   ├── src/main/resources/    # application.properties configuration
-│   ├── .env.example           # Example local environment variable configuration
-│   ├── pom.xml                # Maven project descriptor
-│   └── mvnw / mvnw.cmd        # Maven Wrapper scripts
+│   ├── src/test/java/         # Unit & integration tests (35 tests)
+│   ├── data/                  # search_queries.csv dataset
+│   └── pom.xml
 │
-└── frontend/
-    ├── src/
-    │   ├── api/               # Centralized Axios HTTP clients
-    │   ├── components/        # Reusable presentation components
-    │   ├── pages/             # Page layouts
-    │   ├── hooks/             # Custom React hooks
-    │   ├── services/          # API calling services
-    │   ├── App.jsx            # Core layout & health check
-    │   ├── index.css          # Tailwind CSS configurations
-    │   └── main.jsx
-    ├── .env.example           # Example frontend environment configuration
-    ├── tailwind.config.js     # Tailwind CSS settings
-    └── postcss.config.js      # PostCSS compilation pipeline
+├── frontend/
+│   ├── src/
+│   │   ├── api/               # Axios HTTP client
+│   │   ├── components/        # SearchBar, TrendingSearches, DeveloperDashboard
+│   │   ├── App.jsx            # Main application layout
+│   │   └── index.css          # Tailwind CSS
+│   └── package.json
+│
+└── docs/
+    ├── ARCHITECTURE.md        # System design & component diagrams
+    ├── API.md                 # Full API reference
+    └── VIVA_NOTES.md          # Interview/viva preparation Q&A
 ```
 
 ---
 
-## Database Setup Instructions
+## API Endpoints
 
-1. Make sure **PostgreSQL** is installed and running on your system.
-2. Connect to your PostgreSQL server and create a database named `queryflow`:
-   ```sql
-   CREATE DATABASE queryflow;
-   ```
-3. Locate the `backend/.env.example` file, copy it to `backend/.env`, and customize it with your database connection parameters:
-   * By default, it is configured for port `5432` with username `postgres` and password `postgres`.
-   * If your PostgreSQL is running on a different port (e.g., `5433`), update the `DB_URL` accordingly:
-     ```env
-     DB_URL=jdbc:postgresql://localhost:5433/queryflow
-     DB_USERNAME=postgres
-     DB_PASSWORD=your_secure_password
-     ```
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | System health with DB & Redis status |
+| `GET` | `/suggest?q={prefix}` | Autocomplete suggestions (top 10) |
+| `POST` | `/search` | Submit a search query |
+| `GET` | `/trending` | Top trending searches (scored) |
+| `GET` | `/trending/explain?query={q}` | Score breakdown for a query |
+| `GET` | `/metrics` | Real-time system metrics |
+| `GET` | `/metrics/latency` | Suggestion & trending latency stats |
+| `GET` | `/benchmark/report` | Cache hit rate & write reduction report |
+| `GET` | `/demo/summary` | Combined overview for demos |
+| `GET` | `/cache/stats` | Cache hit/miss counters |
+| `GET` | `/cache/invalidation/stats` | Cache invalidation counters |
+| `GET` | `/batch/status` | Batch writer buffer status |
+| `POST` | `/batch/flush` | Force immediate batch flush |
 
----
-
-## Local Setup & Run Instructions
-
-### 1. Run the Backend (Spring Boot)
-
-1. Open a terminal in the `backend/` directory:
-   ```bash
-   cd backend
-   ```
-2. Make sure you have created your local `backend/.env` file with the correct database connection details.
-3. Build and package the application:
-   * **Windows (PowerShell)**:
-     ```powershell
-     .\mvnw.cmd clean compile
-     ```
-   * **Linux/macOS**:
-     ```bash
-     ./mvnw clean compile
-     ```
-4. Start the application:
-   * **Windows (PowerShell)**:
-     ```powershell
-     .\mvnw.cmd spring-boot:run
-     ```
-   * **Linux/macOS**:
-     ```bash
-     ./mvnw spring-boot:run
-     ```
-5. Check that the health check endpoint returns `UP`:
-   ```bash
-   curl http://localhost:8080/health
-   ```
-   Expected JSON response:
-   ```json
-   {
-     "status": "UP",
-     "service": "QueryFlow"
-   }
-   ```
-
-### 2. Run the Frontend (React-Vite)
-
-1. Open a terminal in the `frontend/` directory:
-   ```bash
-   cd frontend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Copy `frontend/.env.example` to `frontend/.env` to configure the API base URL:
-   ```env
-   VITE_API_BASE_URL=http://localhost:8080
-   ```
-4. Run the development server:
-   ```bash
-   npm run dev
-   ```
-5. Open your browser and navigate to the address shown in the terminal (usually `http://localhost:5173`).
-6. Click **Check Backend Health** to verify frontend-to-backend integration.
+See [docs/API.md](docs/API.md) for full request/response examples.
 
 ---
 
-## Verification & Acceptance
+## Prerequisites
 
-* **Backend Compilation**: Run `.\mvnw.cmd clean compile` inside the `backend` directory to ensure zero errors.
-* **Frontend Compilation**: Run `npm run build` inside the `frontend` directory to ensure production bundles compile successfully.
-* **API Validation**: Calling `/health` logs incoming requests and returns status `UP`.
+1. **Java 23** (JDK)
+2. **Node.js 18+** and npm
+3. **PostgreSQL** running locally
+4. **Redis** — 3 instances on ports 6379, 6380, 6381
+
+### Redis Setup (Windows)
+
+Start three Redis instances:
+```bash
+redis-server --port 6379
+redis-server --port 6380
+redis-server --port 6381
+```
+
+### Database Setup
+
+```sql
+CREATE DATABASE queryflow;
+```
+
+Copy `backend/.env.example` to `backend/.env` and set your credentials:
+```env
+DB_URL=jdbc:postgresql://localhost:5432/queryflow
+DB_USERNAME=postgres
+DB_PASSWORD=your_password
+```
+
+---
+
+## Quick Start
+
+### Backend
+
+```bash
+cd backend
+.\mvnw.cmd clean compile       # Windows
+.\mvnw.cmd spring-boot:run     # Start on port 8080
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev                    # Start on port 5173
+```
+
+### Verify
+
+```bash
+curl http://localhost:8080/health
+# → {"status":"UP","service":"QueryFlow","database":"Connected",...}
+```
+
+Open http://localhost:5173 in your browser.
+
+---
+
+## Running Tests
+
+```bash
+cd backend
+.\mvnw.cmd test
+```
+
+All **35 tests** should pass covering:
+- `SearchServiceTest` — Search submission & buffering
+- `SuggestionServiceTest` — Cache hit/miss/fallback paths
+- `TrendingServiceTest` — Score calculation & ranking
+- `BatchWriteSystemTest` — Buffer aggregation & flush
+- `CacheInvalidationServiceTest` — Prefix generation & eviction
+- `MetricsIntegrationTest` — Cross-service metrics collection
+
+---
+
+## Key Design Decisions
+
+### Consistent Hashing
+MD5-based hash ring with 100 virtual nodes per physical Redis node ensures uniform key distribution. If a node fails, only its keys are redistributed.
+
+### Batch Write Aggregation
+`ConcurrentHashMap.merge()` accumulates search counts in memory. A scheduled task flushes every 30 seconds via a single bulk DB transaction, reducing write load by ~97%.
+
+### Trending Score Formula
+```
+score = 0.7 × (count / maxCount) + 0.3 × (1 / (hoursSinceLastSearch + 1))
+```
+Configurable weights in `application.properties`. Prevents stale queries from permanently dominating.
+
+### Active Cache Invalidation
+After each batch flush, all affected prefix keys (`suggest:i`, `suggest:ip`, ...) and `trending:top` are routed through the hash ring and deleted from the correct Redis nodes.
+
+---
+
+## Configuration
+
+All settings are externalized in `application.properties` with environment variable overrides:
+
+| Property | Default | Description |
+|---|---|---|
+| `server.port` | `8080` | Backend port |
+| `queryflow.batch.flush-interval-seconds` | `30` | Batch flush frequency |
+| `queryflow.trending.limit` | `10` | Number of trending results |
+| `queryflow.trending.popularity-weight` | `0.7` | Popularity score weight |
+| `queryflow.trending.recency-weight` | `0.3` | Recency score weight |
+| `queryflow.trending.candidate-limit` | `500` | Candidate pool size |
+| `queryflow.trending.cache.ttl-minutes` | `5` | Cache TTL safety net |
+
+---
+
+## Documentation
+
+* [Architecture](docs/ARCHITECTURE.md) — System design, diagrams, component details
+* [API Reference](docs/API.md) — Full endpoint documentation
+* [Viva Notes](docs/VIVA_NOTES.md) — Interview Q&A preparation
