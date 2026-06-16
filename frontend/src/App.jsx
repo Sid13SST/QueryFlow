@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import axiosClient from './api/axiosClient';
 import SearchBox from './components/SearchBox';
 import TrendingSearches from './components/TrendingSearches';
+import DeveloperDashboard from './components/DeveloperDashboard';
 import logo from './assets/logo.svg';
 
 const vNodeCount = 30;
@@ -74,6 +75,9 @@ function App() {
   const [searchTrigger, setSearchTrigger] = useState(null);
   const [batchInfo, setBatchInfo] = useState(null);
   const [invalidationInfo, setInvalidationInfo] = useState(null);
+  const [metricsInfo, setMetricsInfo] = useState(null);
+  const [latencyInfo, setLatencyInfo] = useState(null);
+  const [benchmarkInfo, setBenchmarkInfo] = useState(null);
 
   const checkHealth = async () => {
     setIsHealthLoading(true);
@@ -107,12 +111,15 @@ function App() {
     if (showLoader) setIsCacheLoading(true);
     setCacheError(null);
     try {
-      const [statsRes, ringRes, distRes, batchRes, invalidationRes] = await Promise.all([
+      const [statsRes, ringRes, distRes, batchRes, invalidationRes, metricsRes, latencyRes, benchmarkRes] = await Promise.all([
         axiosClient.get('/cache/stats'),
         axiosClient.get('/cache/ring'),
         axiosClient.get('/cache/distribution'),
         axiosClient.get('/batch/status').catch(() => ({ data: null })),
-        axiosClient.get('/cache/invalidation/stats').catch(() => ({ data: null }))
+        axiosClient.get('/cache/invalidation/stats').catch(() => ({ data: null })),
+        axiosClient.get('/metrics').catch(() => ({ data: null })),
+        axiosClient.get('/metrics/latency').catch(() => ({ data: null })),
+        axiosClient.get('/benchmark/report').catch(() => ({ data: null }))
       ]);
       setCacheInfo(statsRes.data);
       setRingInfo(ringRes.data);
@@ -122,6 +129,15 @@ function App() {
       }
       if (invalidationRes && invalidationRes.data) {
         setInvalidationInfo(invalidationRes.data);
+      }
+      if (metricsRes && metricsRes.data) {
+        setMetricsInfo(metricsRes.data);
+      }
+      if (latencyRes && latencyRes.data) {
+        setLatencyInfo(latencyRes.data);
+      }
+      if (benchmarkRes && benchmarkRes.data) {
+        setBenchmarkInfo(benchmarkRes.data);
       }
     } catch (error) {
       setCacheError(error.message || 'Failed to fetch cache stats');
@@ -754,6 +770,15 @@ function App() {
               </div>
 
             </div>
+          </div>
+
+          {/* Developer Metrics & Diagnostics Dashboard */}
+          <div className="max-w-5xl mx-auto w-full pt-4">
+            <DeveloperDashboard 
+              metrics={metricsInfo} 
+              latency={latencyInfo} 
+              benchmark={benchmarkInfo} 
+            />
           </div>
 
         </div>
