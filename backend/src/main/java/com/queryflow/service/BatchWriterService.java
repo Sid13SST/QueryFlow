@@ -26,6 +26,9 @@ public class BatchWriterService {
     @Autowired
     private CacheInvalidationService cacheInvalidationService;
 
+    @Autowired
+    private MetricsService metricsService;
+
     private LocalDateTime lastFlushTime;
 
     @Scheduled(fixedDelayString = "${queryflow.batch.flush-interval-seconds:30}", timeUnit = TimeUnit.SECONDS)
@@ -56,6 +59,7 @@ public class BatchWriterService {
             }
             
             long duration = System.currentTimeMillis() - startTime;
+            metricsService.recordBatchFlush(duration);
             log.info("Batch flush completed. Entries={} Events={} Duration={}ms", entriesCount, eventsCount, duration);
             lastFlushTime = LocalDateTime.now();
             
@@ -81,6 +85,7 @@ public class BatchWriterService {
             throw new RuntimeException("Simulated Database Outage");
         }
         Set<String> queriesToLookup = snapshot.keySet();
+        metricsService.incrementDatabaseReads();
         List<SearchQuery> existing = searchQueryRepository.findByQueryIn(queriesToLookup);
         
         Map<String, SearchQuery> existingMap = existing.stream()
@@ -109,6 +114,7 @@ public class BatchWriterService {
         }
 
         searchQueryRepository.saveAll(toSave);
+        metricsService.incrementDatabaseWrites();
         log.info("Entries flushed: {}. Events flushed: {}.", snapshot.size(), snapshot.values().stream().mapToInt(Integer::intValue).sum());
     }
 
