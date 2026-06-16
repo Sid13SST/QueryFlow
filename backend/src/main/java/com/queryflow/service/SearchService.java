@@ -11,6 +11,9 @@ public class SearchService {
     @Autowired
     private SearchBufferService searchBufferService;
 
+    @Autowired
+    private MetricsService metricsService;
+
     public void recordSearch(String query) {
         if (query == null || query.trim().isEmpty()) {
             throw new IllegalArgumentException("Query cannot be blank");
@@ -20,5 +23,6 @@ public class SearchService {
         log.info("Search received (buffered): '{}'", normalizedQuery);
 
         searchBufferService.increment(normalizedQuery);
+        metricsService.incrementTotalSearches();
     }
 }
