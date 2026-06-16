@@ -28,64 +28,75 @@ public class SuggestionService {
     @Autowired
     private CacheMetricsService cacheMetricsService;
 
+    @Autowired
+    private MetricsService metricsService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @SuppressWarnings("unchecked")
     public List<SuggestionResponse> getSuggestions(String prefix) {
-        if (prefix == null || prefix.trim().isEmpty()) {
-            throw new IllegalArgumentException("Query prefix cannot be empty");
-        }
-
-        String normalizedPrefix = prefix.trim().toLowerCase();
-        log.info("Prefix received: '{}'", normalizedPrefix);
-
-        String cacheKey = "suggest:" + normalizedPrefix;
-        CacheNode targetNode = consistentHashService.route(cacheKey);
+        long startTime = System.currentTimeMillis();
+        metricsService.incrementSuggestionRequests();
         
-        if (targetNode != null) {
-            log.info("prefix={} routedTo={}", normalizedPrefix, targetNode.getNodeId());
-            RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
-            try {
-                Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
-                if (cachedObj instanceof List) {
-                    log.info("CACHE HIT prefix={}", normalizedPrefix);
-                    cacheMetricsService.incrementHits();
-                    
-                    List<?> cachedList = (List<?>) cachedObj;
-                    return cachedList.stream()
-                            .map(item -> objectMapper.convertValue(item, SuggestionResponse.class))
-                            .collect(Collectors.toList());
+        try {
+            if (prefix == null || prefix.trim().isEmpty()) {
+                throw new IllegalArgumentException("Query prefix cannot be empty");
+            }
+
+            String normalizedPrefix = prefix.trim().toLowerCase();
+            log.info("Prefix received: '{}'", normalizedPrefix);
+
+            String cacheKey = "suggest:" + normalizedPrefix;
+            CacheNode targetNode = consistentHashService.route(cacheKey);
+            
+            if (targetNode != null) {
+                log.info("prefix={} routedTo={}", normalizedPrefix, targetNode.getNodeId());
+                RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
+                try {
+                    Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
+                    if (cachedObj instanceof List) {
+                        log.info("CACHE HIT prefix={}", normalizedPrefix);
+                        cacheMetricsService.incrementHits();
+                        
+                        List<?> cachedList = (List<?>) cachedObj;
+                        return cachedList.stream()
+                                .map(item -> objectMapper.convertValue(item, SuggestionResponse.class))
+                                .collect(Collectors.toList());
+                    }
+                } catch (Exception e) {
+                    log.warn("CACHE FALLBACK: Error reading from Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
                 }
-            } catch (Exception e) {
-                log.warn("CACHE FALLBACK: Error reading from Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
+            } else {
+                log.warn("CACHE FALLBACK: No cache nodes available in consistent hash ring");
             }
-        } else {
-            log.warn("CACHE FALLBACK: No cache nodes available in consistent hash ring");
-        }
 
-        log.info("CACHE MISS prefix={}", normalizedPrefix);
-        cacheMetricsService.incrementMisses();
+            log.info("CACHE MISS prefix={}", normalizedPrefix);
+            cacheMetricsService.incrementMisses();
+            metricsService.incrementDatabaseReads();
 
-        // Query database (case-insensitive query starting with prefix)
-        List<SearchQuery> queries = searchQueryRepository.findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc(normalizedPrefix);
-        
-        log.info("Number of results returned from database: {}", queries.size());
+            // Query database (case-insensitive query starting with prefix)
+            List<SearchQuery> queries = searchQueryRepository.findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc(normalizedPrefix);
+            
+            log.info("Number of results returned from database: {}", queries.size());
 
-        List<SuggestionResponse> suggestions = queries.stream()
-                .map(q -> new SuggestionResponse(q.getQuery(), q.getCount()))
-                .collect(Collectors.toList());
+            List<SuggestionResponse> suggestions = queries.stream()
+                    .map(q -> new SuggestionResponse(q.getQuery(), q.getCount()))
+                    .collect(Collectors.toList());
 
-        if (targetNode != null) {
-            RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
-            try {
-                log.info("CACHE STORE prefix={} in node {}", normalizedPrefix, targetNode.getNodeId());
-                redisTemplate.opsForValue().set(cacheKey, suggestions, 5, TimeUnit.MINUTES);
-            } catch (Exception e) {
-                log.warn("CACHE FALLBACK: Error writing to Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
+            if (targetNode != null) {
+                RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
+                try {
+                    log.info("CACHE STORE prefix={} in node {}", normalizedPrefix, targetNode.getNodeId());
+                    redisTemplate.opsForValue().set(cacheKey, suggestions, 5, TimeUnit.MINUTES);
+                } catch (Exception e) {
+                    log.warn("CACHE FALLBACK: Error writing to Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
+                }
             }
-        }
 
-        return suggestions;
+            return suggestions;
+        } finally {
+            metricsService.recordSuggestionLatency(System.currentTimeMillis() - startTime);
+        }
     }
 }
 
