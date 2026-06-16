@@ -46,90 +46,101 @@ public class TrendingService {
     @Autowired
     private TrendingScoreService trendingScoreService;
 
+    @Autowired
+    private MetricsService metricsService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @SuppressWarnings("unchecked")
     public List<TrendingResponse> getTrending() {
-        log.info("TRENDING REQUEST");
+        long startTime = System.currentTimeMillis();
+        metricsService.incrementTrendingRequests();
         
-        String cacheKey = "trending:top";
-        CacheNode targetNode = consistentHashService.route(cacheKey);
+        try {
+            log.info("TRENDING REQUEST");
+            
+            String cacheKey = "trending:top";
+            CacheNode targetNode = consistentHashService.route(cacheKey);
 
-        if (targetNode != null) {
-            log.info("trendingKey={} routedTo={}", cacheKey, targetNode.getNodeId());
-            RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
-            try {
-                Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
-                if (cachedObj instanceof List) {
-                    log.info("TRENDING CACHE HIT");
-                    cacheMetricsService.incrementHits();
-                    
-                    List<?> cachedList = (List<?>) cachedObj;
-                    return cachedList.stream()
-                            .map(item -> objectMapper.convertValue(item, TrendingResponse.class))
-                            .collect(Collectors.toList());
-                }
-            } catch (Exception e) {
-                log.warn("TRENDING CACHE FALLBACK: Error reading from Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
-            }
-        } else {
-            log.warn("TRENDING CACHE FALLBACK: No cache nodes available in consistent hash ring");
-        }
-
-        log.info("TRENDING CACHE MISS");
-        cacheMetricsService.incrementMisses();
-
-        log.info("Trending score calculation started");
-        // Fetch candidates from PostgreSQL
-        List<SearchQuery> candidates = searchQueryRepository.findTopTrending(PageRequest.of(0, candidateLimit));
-        log.info("Trending ranking generated with candidates size {}", candidates.size());
-
-        if (candidates.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        // The first candidate in count DESC has the maximum count
-        long maxCount = candidates.get(0).getCount();
-        LocalDateTime now = LocalDateTime.now();
-
-        List<TrendingResponse> sortedTrending = candidates.stream()
-                .map(q -> {
-                    double popularity = trendingScoreService.calculatePopularityScore(q.getCount(), maxCount);
-                    double recency = trendingScoreService.calculateRecencyScore(q.getLastSearched(), now);
-                    double score = trendingScoreService.calculateFinalScore(popularity, recency);
-                    // Round final score to 2 decimal places for clean representation
-                    double roundedScore = Math.round(score * 100.0) / 100.0;
-                    return TrendingResponse.builder()
-                            .query(q.getQuery())
-                            .count(q.getCount())
-                            .score(roundedScore)
-                            .build();
-                })
-                .sorted((r1, r2) -> {
-                    int compare = Double.compare(r2.getScore(), r1.getScore());
-                    if (compare == 0) {
-                        return Long.compare(r2.getCount(), r1.getCount());
+            if (targetNode != null) {
+                log.info("trendingKey={} routedTo={}", cacheKey, targetNode.getNodeId());
+                RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
+                try {
+                    Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
+                    if (cachedObj instanceof List) {
+                        log.info("TRENDING CACHE HIT");
+                        cacheMetricsService.incrementHits();
+                        
+                        List<?> cachedList = (List<?>) cachedObj;
+                        return cachedList.stream()
+                                .map(item -> objectMapper.convertValue(item, TrendingResponse.class))
+                                .collect(Collectors.toList());
                     }
-                    return compare;
-                })
-                .collect(Collectors.toList());
-
-        // Slice to the output limit
-        List<TrendingResponse> result = sortedTrending.stream()
-                .limit(limit)
-                .collect(Collectors.toList());
-
-        if (targetNode != null) {
-            RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
-            try {
-                log.info("TRENDING CACHE STORE in node {}", targetNode.getNodeId());
-                redisTemplate.opsForValue().set(cacheKey, result, ttlMinutes, TimeUnit.MINUTES);
-            } catch (Exception e) {
-                log.warn("TRENDING CACHE FALLBACK: Error writing to Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
+                } catch (Exception e) {
+                    log.warn("TRENDING CACHE FALLBACK: Error reading from Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
+                }
+            } else {
+                log.warn("TRENDING CACHE FALLBACK: No cache nodes available in consistent hash ring");
             }
-        }
 
-        return result;
+            log.info("TRENDING CACHE MISS");
+            cacheMetricsService.incrementMisses();
+            metricsService.incrementDatabaseReads();
+
+            log.info("Trending score calculation started");
+            // Fetch candidates from PostgreSQL
+            List<SearchQuery> candidates = searchQueryRepository.findTopTrending(PageRequest.of(0, candidateLimit));
+            log.info("Trending ranking generated with candidates size {}", candidates.size());
+
+            if (candidates.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            // The first candidate in count DESC has the maximum count
+            long maxCount = candidates.get(0).getCount();
+            LocalDateTime now = LocalDateTime.now();
+
+            List<TrendingResponse> sortedTrending = candidates.stream()
+                    .map(q -> {
+                        double popularity = trendingScoreService.calculatePopularityScore(q.getCount(), maxCount);
+                        double recency = trendingScoreService.calculateRecencyScore(q.getLastSearched(), now);
+                        double score = trendingScoreService.calculateFinalScore(popularity, recency);
+                        // Round final score to 2 decimal places for clean representation
+                        double roundedScore = Math.round(score * 100.0) / 100.0;
+                        return TrendingResponse.builder()
+                                .query(q.getQuery())
+                                .count(q.getCount())
+                                .score(roundedScore)
+                                .build();
+                    })
+                    .sorted((r1, r2) -> {
+                        int compare = Double.compare(r2.getScore(), r1.getScore());
+                        if (compare == 0) {
+                            return Long.compare(r2.getCount(), r1.getCount());
+                        }
+                        return compare;
+                    })
+                    .collect(Collectors.toList());
+
+            // Slice to the output limit
+            List<TrendingResponse> result = sortedTrending.stream()
+                    .limit(limit)
+                    .collect(Collectors.toList());
+
+            if (targetNode != null) {
+                RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
+                try {
+                    log.info("TRENDING CACHE STORE in node {}", targetNode.getNodeId());
+                    redisTemplate.opsForValue().set(cacheKey, result, ttlMinutes, TimeUnit.MINUTES);
+                } catch (Exception e) {
+                    log.warn("TRENDING CACHE FALLBACK: Error writing to Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
+                }
+            }
+
+            return result;
+        } finally {
+            metricsService.recordTrendingLatency(System.currentTimeMillis() - startTime);
+        }
     }
 
     public Optional<TrendingExplainResponse> explainTrending(String queryStr) {
@@ -137,6 +148,7 @@ public class TrendingService {
             return Optional.empty();
         }
         
+        metricsService.incrementDatabaseReads();
         Optional<SearchQuery> queryOpt = searchQueryRepository.findByQuery(queryStr.trim());
         if (queryOpt.isEmpty()) {
             return Optional.empty();
@@ -146,6 +158,7 @@ public class TrendingService {
         
         // Find max count from database to normalize popularity score
         long maxCount = 0;
+        metricsService.incrementDatabaseReads();
         List<SearchQuery> top = searchQueryRepository.findTopTrending(PageRequest.of(0, 1));
         if (!top.isEmpty()) {
             maxCount = top.get(0).getCount();
