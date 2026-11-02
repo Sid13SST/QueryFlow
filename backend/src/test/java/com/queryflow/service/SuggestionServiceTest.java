@@ -1,5 +1,8 @@
 package com.queryflow.service;
 
+import com.queryflow.cache.ResilientCacheClient;
+import org.springframework.test.util.ReflectionTestUtils;
+
 import com.queryflow.dto.CacheNode;
 import com.queryflow.dto.SuggestionResponse;
 import com.queryflow.entity.SearchQuery;
@@ -48,6 +51,7 @@ class SuggestionServiceTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        ReflectionTestUtils.setField(suggestionService, "cacheClient", new ResilientCacheClient(consistentHashService));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         
         mockNode = CacheNode.builder()
@@ -100,7 +104,8 @@ class SuggestionServiceTest {
         assertEquals(1, results.size());
         assertEquals("iphone 15", results.get(0).getQuery());
         
-        verify(consistentHashService, times(1)).route("suggest:iphone");
+        // Routed once for the GET and once for the SET (both land on the same node).
+        verify(consistentHashService, times(2)).route("suggest:iphone");
         verify(searchQueryRepository, times(1)).findTop10ByQueryStartingWithIgnoreCaseOrderByCountDesc("iphone");
         verify(cacheMetricsService, times(1)).incrementMisses();
         verify(cacheMetricsService, never()).incrementHits();

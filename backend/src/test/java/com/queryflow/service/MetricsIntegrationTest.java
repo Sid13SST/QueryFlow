@@ -1,5 +1,7 @@
 package com.queryflow.service;
 
+import com.queryflow.cache.ResilientCacheClient;
+
 import com.queryflow.dto.BenchmarkReportResponse;
 import com.queryflow.entity.SearchQuery;
 import com.queryflow.repository.SearchQueryRepository;
@@ -55,7 +57,7 @@ class MetricsIntegrationTest {
 
         suggestionService = new SuggestionService();
         ReflectionTestUtils.setField(suggestionService, "searchQueryRepository", searchQueryRepository);
-        ReflectionTestUtils.setField(suggestionService, "consistentHashService", consistentHashService);
+        ReflectionTestUtils.setField(suggestionService, "cacheClient", new ResilientCacheClient(consistentHashService));
         ReflectionTestUtils.setField(suggestionService, "cacheMetricsService", cacheMetricsService);
         ReflectionTestUtils.setField(suggestionService, "metricsService", metricsService);
 
