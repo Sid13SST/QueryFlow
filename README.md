@@ -15,7 +15,7 @@ QueryFlow is a high-performance distributed search typeahead system that deliver
 | 4 | Redis Cache | Single-node Redis caching for suggestions |
 | 5 | Distributed Cache | 3-node Redis cluster with consistent hashing & virtual nodes |
 | 6 | Trending Searches | Top trending queries by search count |
-| 7 | Batch Writes | In-memory buffer + scheduled flush to reduce DB write load by ~97% |
+| 7 | Batch Writes | In-memory buffer + scheduled flush: one write transaction per flush instead of one per search |
 | 8 | Advanced Trending | Popularity + recency decay scoring with configurable weights |
 | 9 | Cache Invalidation | Active prefix-based invalidation after batch flushes |
 | 10 | Metrics & Observability | Real-time metrics dashboard, latency tracking, benchmark reports |
@@ -47,7 +47,7 @@ QueryFlow is a high-performance distributed search typeahead system that deliver
 ## Tech Stack
 
 ### Backend
-* **Java 23** with **Spring Boot 3** (Maven)
+* **Java 17+** (built and tested on JDK 21) with **Spring Boot 4.1** (Maven)
 * **Spring Data JPA** + **PostgreSQL**
 * **Spring Data Redis** (3-node distributed cache)
 * **Lombok** for boilerplate reduction
@@ -112,7 +112,7 @@ QueryFlow/
 | `GET` | `/cache/stats` | Cache hit/miss counters |
 | `GET` | `/cache/invalidation/stats` | Cache invalidation counters |
 | `GET` | `/batch/status` | Batch writer buffer status |
-| `POST` | `/batch/flush` | Force immediate batch flush |
+| `GET` | `/batch/toggle-outage` | Toggle a simulated DB outage for the batch writer (demo only) |
 
 See [docs/API.md](docs/API.md) for full request/response examples.
 
@@ -120,7 +120,7 @@ See [docs/API.md](docs/API.md) for full request/response examples.
 
 ## Prerequisites
 
-1. **Java 23** (JDK)
+1. **JDK 17+** (tested on 21)
 2. **Node.js 18+** and npm
 3. **PostgreSQL** running locally
 4. **Redis** — 3 instances on ports 6379, 6380, 6381
@@ -201,7 +201,7 @@ All **35 tests** should pass covering:
 MD5-based hash ring with 100 virtual nodes per physical Redis node ensures uniform key distribution. If a node fails, only its keys are redistributed.
 
 ### Batch Write Aggregation
-`ConcurrentHashMap.merge()` accumulates search counts in memory. A scheduled task flushes every 30 seconds via a single bulk DB transaction, reducing write load by ~97%.
+`ConcurrentHashMap.merge()` accumulates search counts in memory. A scheduled task flushes every 30 seconds via a single bulk DB transaction. The write reduction depends on traffic × flush interval.
 
 ### Trending Score Formula
 ```
