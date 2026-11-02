@@ -1,11 +1,13 @@
 package com.queryflow.config;
 
+import com.queryflow.cache.CacheResilienceProperties;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.SocketOptions;
 import io.lettuce.core.resource.ClientResources;
 import io.lettuce.core.resource.DefaultClientResources;
 import io.lettuce.core.resource.Delay;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -20,6 +22,7 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 @Configuration
+@EnableConfigurationProperties(CacheResilienceProperties.class)
 public class RedisConfig {
 
     /**
