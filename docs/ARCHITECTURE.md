@@ -85,3 +85,22 @@ Using TTL alone results in stale suggestions or outdated trending lists for up t
 1. **Prefix Generation**: For every query updated in a database batch flush, `PrefixGeneratorService` generates all prefixes (e.g., `"iphone"` -> `["i", "ip", "iph", "ipho", "iphon", "iphone"]`).
 2. **Targeted Eviction**: The system routes each prefix's suggestion key (`suggest:{prefix}`) to its target Redis node on the hash ring and deletes only that key.
 3. **Resilience**: Outages in Redis nodes never block or roll back the PostgreSQL update. A DEL that cannot reach its node is queued and replayed before that node serves another read (section 8), so an invalidation is deferred, not lost.
+
+---
+
+## 7. Rate Limiting
+
+`RateLimitFilter` (a servlet filter, `com.queryflow.ratelimit`) applies a token bucket per **(endpoint group, client IP)**.
+
+| Group | Paths | Burst (capacity) | Sustained (tokens/s) |
+|---|---|---|---|
+| `suggest` | `/suggest` | 30 | 10 |
+| `search` | `/search` | 10 | 2 |
+| `trending` | `/trending`, `/trending/**` | 20 | 5 |
+
+* Why these defaults: the bundled frontend debounces typeahead by 300 ms, so one person produces at most ~3.3 `/suggest` calls/s. The limits leave room for several people behind one NAT address while stopping scripted floods.
+* Over the limit: **HTTP 429**, `Retry-After: <seconds>` (time until the next token, rounded up), JSON body `{"message","endpoint","retryAfterSeconds"}`. Allowed responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
+* Everything is configuration (`queryflow.rate-limit.*`, or env vars such as `RATE_LIMIT_SUGGEST_CAPACITY`); new groups can be added in properties alone. `RATE_LIMIT_ENABLED=false` turns it off.
+* Behind a proxy set `RATE_LIMIT_TRUST_FORWARDED=true`. The client is then the **right-most** `X-Forwarded-For` entry (the address the proxy itself saw); entries further left are client-supplied and ignored.
+* Memory is bounded: idle buckets are swept every minute and the table is capped (`max-tracked-buckets`); past the cap new clients are let through untracked (fail-open) and counted.
+* `/metrics` exposes `rateLimitAllowed`, `rateLimitRejected`, `rateLimitTrackedBuckets` and a per-group breakdown.
