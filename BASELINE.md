@@ -77,3 +77,21 @@ These are facts about the repository, not changes:
   images were pulled from Google's public mirror and re-tagged, e.g.
   `docker pull mirror.gcr.io/library/redis:7-alpine && docker tag mirror.gcr.io/library/redis:7-alpine redis:7-alpine`.
   On a normal machine `docker compose` pulls them directly.
+
+## After the Reliability Lab branch (for comparison)
+
+| Item | Baseline (`main`) | `reliability-lab` |
+|---|---|---|
+| Tests discovered | 35 | 74 |
+| Passed / failed / skipped | 34 / 0 / 1 | 73 / 0 / 1 |
+| External services needed by `mvn test` | none | none (H2 + in-process fake Redis, both test-only) |
+
+The same 74 tests also pass against a real PostgreSQL 16 with
+`QUERYFLOW_TEST_JDBC_URL=jdbc:postgresql://localhost:5432/queryflow_test mvn test`
+(user/password default to `postgres`/`postgres`, override with `QUERYFLOW_TEST_DB_USER` / `QUERYFLOW_TEST_DB_PASSWORD`).
+
+Four existing tests changed because the behavior they pinned changed on purpose. Each change is in the commit that changed the behavior:
+
+- `SuggestionServiceTest.testCacheMissPath` now expects two `route()` calls on a miss (one for GET, one for SET).
+- `BatchWriteSystemTest.testScheduledFlushPersistsExistingAndNewEntities` and `testFlushRollsBackOnDatabaseFailure` now mock the atomic `incrementCount` update instead of `findByQueryIn` + `saveAll`.
+- `MetricsIntegrationTest.testBatchFlushIncrementsMetrics` expects 0 database reads per flush, because the lookup query is gone.
