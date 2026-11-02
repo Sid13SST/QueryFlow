@@ -4,6 +4,27 @@ QueryFlow exposes several REST endpoints for query autocompletion, search loggin
 
 ---
 
+## 0. Rate Limiting (applies to `/suggest`, `/search`, `/trending`, `/trending/**`)
+
+Each client IP has an independent token bucket per endpoint group (defaults: `suggest` 30 burst / 10 per s, `search` 10 / 2, `trending` 20 / 5; see `queryflow.rate-limit.*` in `application.properties`).
+
+* Every limited response carries `X-RateLimit-Limit` (bucket capacity) and `X-RateLimit-Remaining`.
+* When the bucket is empty the request is rejected before reaching the controller:
+  ```http
+  HTTP/1.1 429 Too Many Requests
+  Retry-After: 1
+  X-RateLimit-Limit: 30
+  X-RateLimit-Remaining: 0
+  Content-Type: application/json
+
+  {"message":"Too many requests","endpoint":"suggest","retryAfterSeconds":1}
+  ```
+* Limits are enforced per backend instance (see ARCHITECTURE.md, section 9).
+
+Every response also carries `X-QueryFlow-Instance`, the id of the backend that served it.
+
+---
+
 ## 1. Core Endpoints
 
 ### Get Autocomplete Suggestions
@@ -15,6 +36,7 @@ Returns the top 10 search query suggestion records matching a prefix, sorted by 
   * `q` (string, required): The prefix query to match against.
 * **Request Example**:
   `GET /suggest?q=ip`
+* **Availability**: answered from PostgreSQL when the owning Redis node (or every node) is down, with the same content (see `cacheMode` under `/health`).
 * **Response Example (200 OK)**:
   ```json
   [
@@ -87,13 +109,14 @@ Details the raw metrics and calculated popularity vs. recency components for a q
 ## 2. Observability & Diagnostics
 
 ### Get Global System Metrics
-Provides telemetry for API traffic, cache hit rates, DB reads/writes, and write flushes.
+Provides telemetry for API traffic, cache hit rates, DB reads/writes, write flushes, cache resilience and rate limiting. **All counters are for the instance named in `instanceId`**; sum them across instances for cluster totals. `databaseWrites` counts batch write transactions (one per non-empty flush).
 
 * **URL**: `/metrics`
 * **Method**: `GET`
 * **Response Example (200 OK)**:
   ```json
   {
+    "instanceId": "backend-1",
     "suggestionRequests": 1200,
     "trendingRequests": 250,
     "cacheHits": 980,
@@ -103,9 +126,30 @@ Provides telemetry for API traffic, cache hit rates, DB reads/writes, and write 
     "databaseWrites": 180,
     "batchFlushes": 35,
     "averageFlushDurationMs": 120.0,
-    "cacheInvalidations": 430
+    "cacheInvalidations": 430,
+    "cacheMode": "DEGRADED",
+    "cacheDegradedReads": 57,
+    "cacheShortCircuitedCalls": 51,
+    "cacheDeferredInvalidations": 4,
+    "cacheNodeStates": { "redis-node-1": "CLOSED", "redis-node-2": "OPEN", "redis-node-3": "CLOSED" },
+    "rateLimitAllowed": 1450,
+    "rateLimitRejected": 12,
+    "rateLimitTrackedBuckets": 37,
+    "rateLimitByEndpoint": {
+      "suggest": { "allowed": 1200, "rejected": 12 },
+      "search": { "allowed": 0, "rejected": 0 },
+      "trending": { "allowed": 250, "rejected": 0 }
+    }
   }
   ```
+
+  | Field | Meaning |
+  |---|---|
+  | `cacheMode` | `FULL` (all node circuits closed), `DEGRADED` (some open), `OFFLINE` (none closed) |
+  | `cacheDegradedReads` | Reads answered from PostgreSQL because the owning Redis node was unavailable |
+  | `cacheShortCircuitedCalls` | Redis calls skipped because a node's circuit was open (no network time spent) |
+  | `cacheDeferredInvalidations` | Cache DELs that could not reach their node and were queued for replay on recovery |
+  | `rateLimit*` | Requests allowed / rejected with 429 by the rate limiter, and live client buckets |
 
 ---
 
@@ -171,11 +215,19 @@ Provides live connectivity status of Postgres DB, count of active Redis nodes on
   ```json
   {
     "status": "UP",
+    "instanceId": "backend-1",
     "database": "CONNECTED",
     "redisNodes": 3,
-    "cacheRing": "ACTIVE"
+    "cacheRing": "ACTIVE",
+    "cacheMode": "FULL",
+    "cacheNodes": [
+      { "nodeId": "redis-node-1", "host": "localhost", "port": 6379, "state": "CLOSED",
+        "failures": 0, "shortCircuited": 0, "trips": 0, "recoveries": 0,
+        "pendingInvalidations": 0, "flushOnRecovery": false }
+    ]
   }
   ```
+  `status` stays `UP` while Redis is down: suggestions keep working from PostgreSQL. `cacheNodes` lists all three nodes (one shown).
 
 ---
 
@@ -183,5 +235,6 @@ Provides live connectivity status of Postgres DB, count of active Redis nodes on
 
 * `GET /cache/stats`: Basic cache hits, misses, and hit rate.
 * `GET /cache/ring`: Raw coordinate mappings of active Redis nodes.
-* `GET /cache/distribution`: Distribution of keys cached per Redis node.
+* `GET /cache/distribution`: Distribution of keys cached per Redis node (`-1` = node unreachable or its circuit is open).
+* `GET /cache/debug?prefix=..`: Which node a prefix routes to, that node's circuit state, and whether the key is cached.
 * `GET /batch/status`: Current count of items in the in-memory write buffer and the last flush timestamp.
