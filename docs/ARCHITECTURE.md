@@ -104,3 +104,32 @@ Using TTL alone results in stale suggestions or outdated trending lists for up t
 * Behind a proxy set `RATE_LIMIT_TRUST_FORWARDED=true`. The client is then the **right-most** `X-Forwarded-For` entry (the address the proxy itself saw); entries further left are client-supplied and ignored.
 * Memory is bounded: idle buckets are swept every minute and the table is capped (`max-tracked-buckets`); past the cap new clients are let through untracked (fail-open) and counted.
 * `/metrics` exposes `rateLimitAllowed`, `rateLimitRejected`, `rateLimitTrackedBuckets` and a per-group breakdown.
+
+---
+
+## 8. Redis Outage Resilience
+
+All cache access goes through `ResilientCacheClient` (`com.queryflow.cache`). Callers get one of `HIT`, `MISS` or `UNAVAILABLE`; on `UNAVAILABLE` they read PostgreSQL and skip the cache write. The client never throws.
+
+```text
+ request ──► route(key) on hash ring ──► owner node N
+                                            │
+                       circuit[N] CLOSED ───┼──► Redis GET ──ok──► HIT / MISS
+                                            │        └─error─► failure++ ──► UNAVAILABLE
+                       circuit[N] OPEN ─────┴──► UNAVAILABLE immediately (no network call)
+                                                           │
+                                                           ▼
+                                                PostgreSQL (correct, slower)
+```
+
+**Circuit breaker per node.** `failure-threshold` (3) consecutive errors open the node's circuit for `open-duration-ms` (5000). While open, calls for that node return immediately, so a dead node costs no timeouts. Afterwards exactly one probe (PING) is allowed; success closes the circuit, failure re-opens it. A background prober (`probe-interval-ms`, 2000) probes due circuits even without traffic, so recovery does not wait for a request. Lettuce's reconnect backoff is capped at 2 s (its default grows to 30 s), and Redis command/connect timeouts are 500 ms (configurable).
+
+**Ring semantics are preserved.** A key whose owner is unhealthy is not re-routed to the next node. Losing one of three nodes loses about a third of the keys, and the other two thirds keep hitting. Re-routing was rejected because the fallback node would hold copies of keys it does not own. Targeted invalidation only deletes on the owner, so after recovery those copies could be served stale.
+
+**No stale reads after a partition heals.** If a DEL (invalidation after a batch flush) cannot reach the owner, the key is queued for that node. Before the node serves its next call, the queue is replayed. If more than `max-pending-invalidations` (10 000) keys are queued, the node is flushed on recovery instead. That costs only that node's share of the cache.
+
+**Bad values are not node failures.** A value that cannot be deserialised is evicted and treated as a miss. It never counts towards opening the circuit.
+
+**Observability.** `/health` reports `cacheMode` (`FULL`, `DEGRADED` or `OFFLINE`) and per-node circuit state, failures, trips, recoveries and pending invalidations. `/metrics` reports `cacheMode`, `cacheDegradedReads`, `cacheShortCircuitedCalls`, `cacheDeferredInvalidations` and `cacheNodeStates`.
+
+**Tests.** `RedisOutageIntegrationTest` runs the whole application (MockMvc, real Lettuce client, H2) against three in-process `FakeRedisServer`s that can be stopped and started. It checks four things: correct answers with every node down, healthy nodes keep hitting with one down, the hit rate returns to 100% after restart, and a healed partition never serves a stale count. `ResilientCacheClientTest` and `CircuitBreakerTest` cover the mechanics. Real-Redis drills are in `scripts/cluster_bench.py --phases outage`.
