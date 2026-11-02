@@ -1,17 +1,37 @@
 package com.queryflow.config;
 
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.SocketOptions;
+import io.lettuce.core.resource.ClientResources;
+import io.lettuce.core.resource.DefaultClientResources;
+import io.lettuce.core.resource.Delay;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
+
 @Configuration
 public class RedisConfig {
+
+    /**
+     * Per-command and connect timeouts. Redis answers in well under a millisecond
+     * on a LAN, so these only bound how long a dead or hung node can stall one
+     * request before the circuit breaker takes over.
+     */
+    @Value("${queryflow.cache.redis.command-timeout-ms:500}")
+    private long commandTimeoutMs;
+
+    @Value("${queryflow.cache.redis.connect-timeout-ms:500}")
+    private long connectTimeoutMs;
 
     @Value("${redis.nodes.node1.host}")
     private String node1Host;
@@ -31,46 +51,43 @@ public class RedisConfig {
     @Value("${redis.nodes.node3.port}")
     private int node3Port;
 
-    private LettuceConnectionFactory createConnectionFactory(String host, int port) {
+    /**
+     * Shared Lettuce resources. Lettuce reconnects automatically after a node comes
+     * back, but its default backoff grows to 30 s; capping it at 2 s bounds how long
+     * a recovered node stays unused.
+     */
+    public static ClientResources createClientResources() {
+        return DefaultClientResources.builder()
+                .reconnectDelay(Delay.exponential(Duration.ofMillis(50), Duration.ofSeconds(2), 2, TimeUnit.MILLISECONDS))
+                .build();
+    }
+
+    public static LettuceConnectionFactory createConnectionFactory(String host, int port, long connectTimeoutMs,
+                                                                   long commandTimeoutMs, ClientResources resources) {
         RedisStandaloneConfiguration config = new RedisStandaloneConfiguration(host, port);
-        
-        io.lettuce.core.SocketOptions socketOptions = io.lettuce.core.SocketOptions.builder()
-                .connectTimeout(java.time.Duration.ofMillis(1000))
+
+        SocketOptions socketOptions = SocketOptions.builder()
+                .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .build();
-                
-        io.lettuce.core.ClientOptions clientOptions = io.lettuce.core.ClientOptions.builder()
+
+        // Fail fast while disconnected instead of buffering commands until reconnect.
+        ClientOptions clientOptions = ClientOptions.builder()
                 .socketOptions(socketOptions)
-                .disconnectedBehavior(io.lettuce.core.ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
+                .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
                 .build();
-                
-        org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration clientConfig = 
-                org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration.builder()
-                        .commandTimeout(java.time.Duration.ofMillis(1000))
-                        .clientOptions(clientOptions)
-                        .build();
-                        
+
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+                .commandTimeout(Duration.ofMillis(commandTimeoutMs))
+                .clientOptions(clientOptions)
+                .clientResources(resources)
+                .build();
+
         LettuceConnectionFactory factory = new LettuceConnectionFactory(config, clientConfig);
         factory.afterPropertiesSet();
         return factory;
     }
 
-    @Bean
-    @Primary
-    public LettuceConnectionFactory redisNode1ConnectionFactory() {
-        return createConnectionFactory(node1Host, node1Port);
-    }
-
-    @Bean
-    public LettuceConnectionFactory redisNode2ConnectionFactory() {
-        return createConnectionFactory(node2Host, node2Port);
-    }
-
-    @Bean
-    public LettuceConnectionFactory redisNode3ConnectionFactory() {
-        return createConnectionFactory(node3Host, node3Port);
-    }
-
-    private RedisTemplate<String, Object> createRedisTemplate(LettuceConnectionFactory connectionFactory) {
+    public static RedisTemplate<String, Object> createRedisTemplate(LettuceConnectionFactory connectionFactory) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         
@@ -86,6 +103,27 @@ public class RedisConfig {
         
         template.afterPropertiesSet();
         return template;
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    public ClientResources lettuceClientResources() {
+        return createClientResources();
+    }
+
+    @Bean
+    @Primary
+    public LettuceConnectionFactory redisNode1ConnectionFactory() {
+        return createConnectionFactory(node1Host, node1Port, connectTimeoutMs, commandTimeoutMs, lettuceClientResources());
+    }
+
+    @Bean
+    public LettuceConnectionFactory redisNode2ConnectionFactory() {
+        return createConnectionFactory(node2Host, node2Port, connectTimeoutMs, commandTimeoutMs, lettuceClientResources());
+    }
+
+    @Bean
+    public LettuceConnectionFactory redisNode3ConnectionFactory() {
+        return createConnectionFactory(node3Host, node3Port, connectTimeoutMs, commandTimeoutMs, lettuceClientResources());
     }
 
     @Bean(name = "redisNode1Template")
@@ -104,4 +142,3 @@ public class RedisConfig {
         return createRedisTemplate(redisNode3ConnectionFactory());
     }
 }
-
