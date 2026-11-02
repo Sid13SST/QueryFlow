@@ -6,7 +6,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionOperations;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -31,6 +33,14 @@ public class BatchWriterService {
 
     private LocalDateTime lastFlushTime;
 
+    /** Real transactions when running in Spring; plain execution in Spring-free unit tests. */
+    private TransactionOperations transactionOperations = TransactionOperations.withoutTransaction();
+
+    @Autowired(required = false)
+    public void setTransactionManager(PlatformTransactionManager transactionManager) {
+        this.transactionOperations = new TransactionTemplate(transactionManager);
+    }
+
     @Scheduled(fixedDelayString = "${queryflow.batch.flush-interval-seconds:30}", timeUnit = TimeUnit.SECONDS)
     public void scheduleFlush() {
         log.info("Batch flush started");
@@ -47,8 +57,9 @@ public class BatchWriterService {
         long eventsCount = snapshot.values().stream().mapToLong(Integer::longValue).sum();
 
         try {
-            // Persist the batch transactionally
-            persistBatch(snapshot);
+            // Persist the batch in ONE transaction. persistBatch is called on `this`, so a
+            // @Transactional annotation on it would be bypassed (no proxy); use an explicit template.
+            transactionOperations.executeWithoutResult(status -> persistBatch(snapshot));
             
             // Invalidate affected cache entries ONLY after successful DB update
             try {
@@ -79,7 +90,6 @@ public class BatchWriterService {
         return simulateDbOutage;
     }
 
-    @Transactional
     public void persistBatch(Map<String, Integer> snapshot) {
         if (simulateDbOutage) {
             throw new RuntimeException("Simulated Database Outage");
