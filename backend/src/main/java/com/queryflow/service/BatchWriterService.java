@@ -13,7 +13,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -90,42 +89,44 @@ public class BatchWriterService {
         return simulateDbOutage;
     }
 
+    /**
+     * Applies one aggregated batch. Must run inside a single transaction (see
+     * {@link #scheduleFlush()}) so that a failure part-way leaves the database
+     * untouched and the snapshot can be safely re-buffered without double counting.
+     *
+     * Multi-instance safety: existing rows are incremented with an atomic
+     * {@code count = count + delta} UPDATE instead of load-modify-save, and keys
+     * are processed in sorted order so concurrent flushes from different instances
+     * lock rows in the same order (no deadlocks between them). If two instances
+     * insert the same brand-new query at once, the unique constraint rejects one
+     * transaction; that instance rolls back and re-applies on its next flush, at
+     * which point the row exists and the UPDATE path is taken.
+     */
     public void persistBatch(Map<String, Integer> snapshot) {
         if (simulateDbOutage) {
             throw new RuntimeException("Simulated Database Outage");
         }
-        Set<String> queriesToLookup = snapshot.keySet();
-        metricsService.incrementDatabaseReads();
-        List<SearchQuery> existing = searchQueryRepository.findByQueryIn(queriesToLookup);
-        
-        Map<String, SearchQuery> existingMap = existing.stream()
-                .collect(Collectors.toMap(SearchQuery::getQuery, q -> q));
-                
-        List<SearchQuery> toSave = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
+        List<SearchQuery> toInsert = new ArrayList<>();
 
-        for (Map.Entry<String, Integer> entry : snapshot.entrySet()) {
-            String qStr = entry.getKey();
-            long count = entry.getValue();
-
-            SearchQuery sq = existingMap.get(qStr);
-            if (sq != null) {
-                sq.setCount(sq.getCount() + count);
-                sq.setLastSearched(now);
-                toSave.add(sq);
-            } else {
-                SearchQuery newSq = SearchQuery.builder()
-                        .query(qStr)
-                        .count(count)
+        for (Map.Entry<String, Integer> entry : new TreeMap<>(snapshot).entrySet()) {
+            int updated = searchQueryRepository.incrementCount(entry.getKey(), entry.getValue(), now);
+            if (updated == 0) {
+                toInsert.add(SearchQuery.builder()
+                        .query(entry.getKey())
+                        .count(entry.getValue().longValue())
                         .lastSearched(now)
-                        .build();
-                toSave.add(newSq);
+                        .build());
             }
         }
 
-        searchQueryRepository.saveAll(toSave);
+        if (!toInsert.isEmpty()) {
+            searchQueryRepository.saveAllAndFlush(toInsert);
+        }
         metricsService.incrementDatabaseWrites();
-        log.info("Entries flushed: {}. Events flushed: {}.", snapshot.size(), snapshot.values().stream().mapToInt(Integer::intValue).sum());
+        log.info("Entries flushed: {} ({} updated, {} inserted). Events flushed: {}.", snapshot.size(),
+                snapshot.size() - toInsert.size(), toInsert.size(),
+                snapshot.values().stream().mapToInt(Integer::intValue).sum());
     }
 
     public LocalDateTime getLastFlushTime() {

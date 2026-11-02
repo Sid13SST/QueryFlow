@@ -83,31 +83,25 @@ class BatchWriteSystemTest {
         searchBufferService.increment("java");        // existing
         searchBufferService.increment("java");
 
-        SearchQuery javaQuery = SearchQuery.builder()
-                .id(1L)
-                .query("java")
-                .count(5L)
-                .build();
-
-        // Mock findByQueryIn to return the existing java entity
-        when(searchQueryRepository.findByQueryIn(anyCollection()))
-                .thenReturn(Collections.singletonList(javaQuery));
+        // "java" exists: the atomic increment touches 1 row. "spring boot" does not: 0 rows.
+        when(searchQueryRepository.incrementCount(eq("java"), eq(2L), any())).thenReturn(1);
+        when(searchQueryRepository.incrementCount(eq("spring boot"), eq(1L), any())).thenReturn(0);
 
         batchWriterService.scheduleFlush();
 
-        // Verify saveAll was called
+        // Existing rows are incremented in the database, never loaded and overwritten.
+        verify(searchQueryRepository).incrementCount(eq("java"), eq(2L), any());
+        verify(searchQueryRepository, never()).findByQueryIn(anyCollection());
+
+        // Only the new query is inserted.
         ArgumentCaptor<List<SearchQuery>> captor = ArgumentCaptor.forClass(List.class);
-        verify(searchQueryRepository).saveAll(captor.capture());
+        verify(searchQueryRepository).saveAllAndFlush(captor.capture());
 
         List<SearchQuery> savedList = captor.getValue();
-        assertEquals(2, savedList.size());
-
-        SearchQuery savedJava = savedList.stream().filter(q -> q.getQuery().equals("java")).findFirst().orElseThrow();
-        assertEquals(7L, savedJava.getCount()); // 5 + 2
-        assertNotNull(savedJava.getLastSearched());
-
-        SearchQuery savedSpring = savedList.stream().filter(q -> q.getQuery().equals("spring boot")).findFirst().orElseThrow();
-        assertEquals(1L, savedSpring.getCount()); // new
+        assertEquals(1, savedList.size());
+        SearchQuery savedSpring = savedList.get(0);
+        assertEquals("spring boot", savedSpring.getQuery());
+        assertEquals(1L, savedSpring.getCount());
         assertNotNull(savedSpring.getLastSearched());
 
         // Verify buffer cleared
@@ -120,8 +114,8 @@ class BatchWriteSystemTest {
         searchBufferService.increment("spring boot");
         searchBufferService.increment("java");
 
-        // Force exception on lookup/save
-        when(searchQueryRepository.findByQueryIn(anyCollection()))
+        // Force exception on the database write
+        when(searchQueryRepository.incrementCount(anyString(), anyLong(), any()))
                 .thenThrow(new RuntimeException("Database offline"));
 
         batchWriterService.scheduleFlush();

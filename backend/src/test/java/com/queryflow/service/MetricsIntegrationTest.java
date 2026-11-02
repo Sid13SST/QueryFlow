@@ -138,9 +138,6 @@ class MetricsIntegrationTest {
         searchService.recordSearch("apple");
         searchService.recordSearch("banana");
 
-        when(searchQueryRepository.findByQueryIn(anyCollection()))
-                .thenReturn(Collections.emptyList());
-
         assertEquals(0, metricsService.getBatchFlushCount());
         assertEquals(0, metricsService.getDatabaseReads());
         assertEquals(0, metricsService.getDatabaseWrites());
@@ -148,8 +145,8 @@ class MetricsIntegrationTest {
         batchWriterService.scheduleFlush();
 
         assertEquals(1, metricsService.getBatchFlushCount());
-        assertEquals(1, metricsService.getDatabaseReads()); // inside persistBatch lookup
-        assertEquals(1, metricsService.getDatabaseWrites()); // inside persistBatch saveAll
+        assertEquals(0, metricsService.getDatabaseReads()); // atomic increments need no lookup
+        assertEquals(1, metricsService.getDatabaseWrites()); // one batched write transaction per flush
         assertTrue(metricsService.getLastFlushDurationMs() >= 0);
         assertTrue(metricsService.getAverageFlushDurationMs() >= 0);
     }
