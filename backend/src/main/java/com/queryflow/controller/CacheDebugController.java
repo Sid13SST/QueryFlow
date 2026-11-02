@@ -1,5 +1,6 @@
 package com.queryflow.controller;
 
+import com.queryflow.cache.ResilientCacheClient;
 import com.queryflow.dto.CacheNode;
 import com.queryflow.service.ConsistentHashService;
 import lombok.extern.slf4j.Slf4j;
@@ -12,7 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 
 @RestController
 @Slf4j
@@ -21,6 +21,9 @@ public class CacheDebugController {
 
     @Autowired
     private ConsistentHashService consistentHashService;
+
+    @Autowired
+    private ResilientCacheClient cacheClient;
 
     @GetMapping("/cache/debug")
     public ResponseEntity<Map<String, Object>> debugRoute(@RequestParam("prefix") String prefix) {
@@ -33,13 +36,8 @@ public class CacheDebugController {
         
         if (routedNode != null) {
             response.put("node", routedNode.getNodeId());
-            boolean cacheHit = false;
-            try {
-                cacheHit = Boolean.TRUE.equals(routedNode.getRedisTemplate().hasKey(cacheKey));
-            } catch (Exception e) {
-                log.warn("Error checking key availability on node {}: {}", routedNode.getNodeId(), e.getMessage());
-            }
-            response.put("cacheHit", cacheHit);
+            response.put("nodeState", cacheClient.getState(routedNode).name());
+            response.put("cacheHit", cacheClient.hasKey(cacheKey));
         } else {
             response.put("node", "none");
             response.put("cacheHit", false);
@@ -66,13 +64,8 @@ public class CacheDebugController {
         Map<String, Long> distribution = new HashMap<>();
         
         for (CacheNode node : consistentHashService.getNodes()) {
-            try {
-                Set<String> keys = node.getRedisTemplate().keys("suggest:*");
-                distribution.put(node.getNodeId(), keys != null ? (long) keys.size() : 0L);
-            } catch (Exception e) {
-                log.warn("Failed to get keys count for node {}: {}", node.getNodeId(), e.getMessage());
-                distribution.put(node.getNodeId(), -1L); // -1 indicates node is offline/unreachable
-            }
+            // -1 indicates the node is offline/unreachable (or its circuit is open)
+            distribution.put(node.getNodeId(), cacheClient.countKeys(node, "suggest:*"));
         }
         
         return ResponseEntity.ok(distribution);
