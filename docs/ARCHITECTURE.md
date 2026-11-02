@@ -44,7 +44,7 @@ Cache keys are distributed across Redis nodes via consistent hashing to prevent 
 1. **Hashing Function**: An MD5 digest is computed for keys. The first 8 bytes of the digest are read as a 64-bit integer (`long`) mapping to positions on a $2^{64}$ coordinate ring.
 2. **Replication/Virtual Nodes**: Each of the 3 physical Redis nodes registers 100 virtual node tokens on the ring. This maintains uniform distribution and prevents skewing (hot spotting) on a single physical node.
 3. **Key Routing**: A cache key's MD5 hash is matched against the ring. The system traverses clockwise to the nearest virtual node token and sends the request to that token's corresponding physical Redis node.
-4. **Resilience**: If a Redis node fails, the ring continues routing requests to the remaining online nodes. Read misses fall back gracefully to PostgreSQL, keeping the service fully operational.
+4. **Resilience**: If a Redis node fails, keys owned by that node are served from PostgreSQL while the other nodes keep serving theirs. Keys are deliberately *not* re-routed to the next node on the ring (see section 8).
 
 ---
 
@@ -55,8 +55,10 @@ Direct updates to PostgreSQL on every search cause heavy lock contention and tra
 ### Aggregation Mechanism
 1. **In-Memory Buffer**: Incoming searches are pushed to `ConcurrentHashMap` counters inside `SearchBufferService`. No database transaction is initialized.
 2. **Scheduled Flush**: A scheduled task (running every 30 seconds) flushes the buffer snapshot.
-3. **Bulk Merge**: The batch task queries the database in a single round-trip (`findByQueryIn`), resolves existing records, increments counts, sets the last searched time, and commits them all in a single bulk write transaction (`saveAll`).
-4. **Failure Recovery**: If the database transaction fails (e.g. database offline), the snapshot is rolled back into the in-memory buffer to prevent data loss, and retried on the next cycle.
+3. **Atomic Increments**: Inside one transaction, each buffered query is applied with `UPDATE search_queries SET count = count + :delta, last_searched = :now WHERE query = :q` (keys in sorted order). Queries that update 0 rows are new and are inserted with `saveAllAndFlush`. The count is never read into Java and written back, so concurrent flushes from several backend instances cannot overwrite each other (section 9).
+4. **Failure Recovery**: If the transaction fails (database offline, or another instance inserted the same new query first), it rolls back as a whole and the snapshot is merged back into the in-memory buffer, then retried on the next cycle. Because nothing was committed, the retry cannot double count.
+
+> Before the Reliability Lab branch the flush loaded rows, added the delta in Java and saved the absolute value, and the method's `@Transactional` was bypassed (it was called on `this`). Both are fixed; `MultiInstanceBatchWriteTest` fails against the old logic.
 
 ---
 
@@ -82,4 +84,4 @@ Using TTL alone results in stale suggestions or outdated trending lists for up t
 ### Invalidation Mechanics
 1. **Prefix Generation**: For every query updated in a database batch flush, `PrefixGeneratorService` generates all prefixes (e.g., `"iphone"` -> `["i", "ip", "iph", "ipho", "iphon", "iphone"]`).
 2. **Targeted Eviction**: The system routes each prefix's suggestion key (`suggest:{prefix}`) to its target Redis node on the hash ring and deletes only that key.
-3. **Resilience**: Outages in Redis nodes log warnings but never block or rollback the PostgreSQL database transactional updates.
+3. **Resilience**: Outages in Redis nodes never block or roll back the PostgreSQL update. A DEL that cannot reach its node is queued and replayed before that node serves another read (section 8), so an invalidation is deferred, not lost.
