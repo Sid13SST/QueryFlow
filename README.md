@@ -19,6 +19,9 @@ QueryFlow is a high-performance distributed search typeahead system that deliver
 | 8 | Advanced Trending | Popularity + recency decay scoring with configurable weights |
 | 9 | Cache Invalidation | Active prefix-based invalidation after batch flushes |
 | 10 | Metrics & Observability | Real-time metrics dashboard, latency tracking, benchmark reports |
+| 11 | Rate Limiting | Per-client-IP token buckets on `/suggest`, `/search`, `/trending`; HTTP 429 + `Retry-After`; configurable; metrics |
+| 12 | Redis-Outage Resilience | Per-node circuit breakers, PostgreSQL fallback, automatic recovery, no stale reads after a partition heals |
+| 13 | Multi-Instance Readiness | Atomic batch increments, instance ids, 2 backends + nginx via docker-compose, reproducible cluster benchmark |
 
 ---
 
@@ -42,6 +45,8 @@ QueryFlow is a high-performance distributed search typeahead system that deliver
 [PostgreSQL] ──► [Cache Invalidator] ────────► [Targeted Key Eviction]
 ```
 
+In front of this, a rate-limit filter guards the public endpoints. Every Redis call goes through a per-node circuit breaker: if a node is down, its keys are served from PostgreSQL and the other nodes keep serving theirs. Any number of identical backends can run behind a load balancer (see [Scaling & Reliability](#scaling--reliability)).
+
 ---
 
 ## Tech Stack
@@ -60,6 +65,7 @@ QueryFlow is a high-performance distributed search typeahead system that deliver
 ### Infrastructure
 * **PostgreSQL** — Persistent storage
 * **Redis** × 3 — Distributed cache nodes (ports 6379, 6380, 6381)
+* **nginx** — Load balancer for the 2-instance cluster (`docker-compose.cluster.yml`)
 
 ---
 
@@ -69,15 +75,17 @@ QueryFlow is a high-performance distributed search typeahead system that deliver
 QueryFlow/
 ├── backend/
 │   ├── src/main/java/com/queryflow/
-│   │   ├── config/            # Redis config, CORS, exception handlers
+│   │   ├── cache/             # ResilientCacheClient, per-node circuit breakers
+│   │   ├── config/            # Redis config, instance id filter, exception handlers
+│   │   ├── ratelimit/         # Token buckets, rate-limit filter and properties
 │   │   ├── controller/        # REST endpoints (12 controllers)
 │   │   ├── dto/               # Response DTOs (16 classes)
 │   │   ├── entity/            # JPA entities (SearchQuery)
 │   │   ├── repository/        # Spring Data repositories
 │   │   ├── service/           # Business logic (12 services)
 │   │   └── QueryFlowApplication.java
-│   ├── src/test/java/         # Unit & integration tests (35 tests)
-│   ├── data/                  # search_queries.csv dataset
+│   ├── src/test/java/         # Unit & integration tests (74 tests)
+│   ├── Dockerfile             # Runtime image (copies the built jar)
 │   └── pom.xml
 │
 ├── frontend/
@@ -87,6 +95,12 @@ QueryFlow/
 │   │   ├── App.jsx            # Main application layout
 │   │   └── index.css          # Tailwind CSS
 │   └── package.json
+│
+├── deploy/nginx.conf          # Load balancer config for the cluster
+├── scripts/                   # Cluster benchmark & Redis outage drill
+├── docker-compose.yml         # 3 Redis nodes for local development
+├── docker-compose.cluster.yml # 2 backends + nginx + PostgreSQL + 3 Redis
+├── BASELINE.md                # Test baseline before the reliability work
 │
 └── docs/
     ├── ARCHITECTURE.md        # System design & component diagrams
@@ -100,12 +114,12 @@ QueryFlow/
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/health` | System health with DB & Redis status |
+| `GET` | `/health` | System health, DB status, cache mode and per-node circuit state |
 | `GET` | `/suggest?q={prefix}` | Autocomplete suggestions (top 10) |
 | `POST` | `/search` | Submit a search query |
 | `GET` | `/trending` | Top trending searches (scored) |
 | `GET` | `/trending/explain?query={q}` | Score breakdown for a query |
-| `GET` | `/metrics` | Real-time system metrics |
+| `GET` | `/metrics` | Per-instance metrics incl. cache resilience and rate limiting |
 | `GET` | `/metrics/latency` | Suggestion & trending latency stats |
 | `GET` | `/benchmark/report` | Cache hit rate & write reduction report |
 | `GET` | `/demo/summary` | Combined overview for demos |
@@ -113,6 +127,8 @@ QueryFlow/
 | `GET` | `/cache/invalidation/stats` | Cache invalidation counters |
 | `GET` | `/batch/status` | Batch writer buffer status |
 | `GET` | `/batch/toggle-outage` | Toggle a simulated DB outage for the batch writer (demo only) |
+
+`/suggest`, `/search` and `/trending/**` are rate limited per client IP; over the limit they return `429 Too Many Requests` with `Retry-After`. Every response carries `X-QueryFlow-Instance`.
 
 See [docs/API.md](docs/API.md) for full request/response examples.
 
@@ -182,16 +198,27 @@ Open http://localhost:5173 in your browser.
 
 ```bash
 cd backend
-.\mvnw.cmd test
+.\mvnw.cmd test        # Windows
+./mvnw test            # Linux / macOS (or: mvn test)
 ```
 
-All **35 tests** should pass covering:
+**74 tests** (73 pass, 1 disabled context test; the baseline was 35, see [BASELINE.md](BASELINE.md)). No PostgreSQL, Redis or Docker is needed: full-context tests use H2 and an in-process fake Redis that can be stopped and started. To run the same tests against a real PostgreSQL:
+
+```bash
+QUERYFLOW_TEST_JDBC_URL=jdbc:postgresql://localhost:5432/queryflow_test ./mvnw test
+```
+
+Coverage:
 - `SearchServiceTest` — Search submission & buffering
 - `SuggestionServiceTest` — Cache hit/miss/fallback paths
 - `TrendingServiceTest` — Score calculation & ranking
 - `BatchWriteSystemTest` — Buffer aggregation & flush
 - `CacheInvalidationServiceTest` — Prefix generation & eviction
 - `MetricsIntegrationTest` — Cross-service metrics collection
+- `TokenBucketTest`, `RateLimiterServiceTest`, `RateLimitWebTest`, `RateLimitConfigurationTest` — 429/Retry-After, per-IP isolation, config/env overrides, metrics
+- `CircuitBreakerTest`, `ResilientCacheClientTest` — breaker states, one/all nodes down, recovery, invalidation replay
+- `RedisOutageIntegrationTest` — whole app with Redis stopped: correct answers, hit-rate recovery, no stale reads
+- `MultiInstanceBatchWriteTest` — two writers flushing concurrently: no lost or double-counted searches
 
 ---
 
@@ -201,7 +228,7 @@ All **35 tests** should pass covering:
 MD5-based hash ring with 100 virtual nodes per physical Redis node ensures uniform key distribution. If a node fails, only its keys are redistributed.
 
 ### Batch Write Aggregation
-`ConcurrentHashMap.merge()` accumulates search counts in memory. A scheduled task flushes every 30 seconds via a single bulk DB transaction. The write reduction depends on traffic × flush interval.
+`ConcurrentHashMap.merge()` accumulates search counts in memory. A scheduled task flushes every 30 seconds in a single transaction, using atomic `count = count + delta` updates so several instances can flush concurrently. The write reduction depends on traffic × flush interval. In the cluster benchmark, 2000 searches produced 4 write transactions (99.8% fewer).
 
 ### Trending Score Formula
 ```
@@ -211,6 +238,35 @@ Configurable weights in `application.properties`. Prevents stale queries from pe
 
 ### Active Cache Invalidation
 After each batch flush, all affected prefix keys (`suggest:i`, `suggest:ip`, ...) and `trending:top` are routed through the hash ring and deleted from the correct Redis nodes.
+
+### Redis Outage Handling
+Each Redis node has its own circuit breaker. A node that keeps failing is skipped (no timeouts) and its keys are read from PostgreSQL. It is probed again after 5 s and resumes automatically. Invalidations it missed are replayed before it serves reads again.
+
+### Rate Limiting
+A token bucket per (endpoint, client IP), held in memory on each instance so it keeps working when Redis is down. Behind a proxy the client IP is the right-most `X-Forwarded-For` entry.
+
+---
+
+## Scaling & Reliability
+
+Run two backends behind nginx, sharing PostgreSQL and the Redis ring:
+
+```bash
+scripts/run-cluster-bench.sh          # builds, starts the cluster, runs the benchmark
+```
+
+This uses only free tools (Docker, Python 3 standard library). Measured on a 4-vCPU Linux container; details and caveats are in [docs/ARCHITECTURE.md §9](docs/ARCHITECTURE.md#9-horizontal-scaling-2-instances):
+
+| Scenario | Result |
+|---|---|
+| 5000 `/suggest`, 16 concurrent, cold cache | 2500 / 2500 per instance, 0 errors, 98.6% cluster hit rate (one miss per distinct prefix across both instances) |
+| 2000 concurrent `/search` via both instances | PostgreSQL counts exact (+1000 / +1000) |
+| 1 of 3 Redis nodes stopped | 0 errors, 0 wrong answers, 57.4% hit rate |
+| All Redis nodes stopped | 0 errors, 0 wrong answers (served from PostgreSQL) |
+| Redis back (empty) | `cacheMode` FULL after 5.9 s; hit rate back to 100% on the second pass |
+| 100-request burst from one client | 72 allowed, 28 rejected with 429 (limits are per instance) |
+
+Still instance-local by design: the write buffer, `/metrics` counters (sum across instances), rate-limit buckets and circuit state. The reasons are documented in ARCHITECTURE.md.
 
 ---
 
@@ -227,6 +283,16 @@ All settings are externalized in `application.properties` with environment varia
 | `queryflow.trending.recency-weight` | `0.3` | Recency score weight |
 | `queryflow.trending.candidate-limit` | `500` | Candidate pool size |
 | `queryflow.trending.cache.ttl-minutes` | `5` | Cache TTL safety net |
+| `queryflow.instance-id` | `$INSTANCE_ID` / hostname | Instance name in `/metrics`, `/health`, `X-QueryFlow-Instance` |
+| `queryflow.rate-limit.enabled` | `true` | Master switch (`RATE_LIMIT_ENABLED`) |
+| `queryflow.rate-limit.trust-forwarded-header` | `false` | Use right-most `X-Forwarded-For` as client IP (`RATE_LIMIT_TRUST_FORWARDED`) |
+| `queryflow.rate-limit.endpoints.suggest.capacity` / `.refill-per-second` | `30` / `10` | `/suggest` burst / sustained rate |
+| `queryflow.rate-limit.endpoints.search.capacity` / `.refill-per-second` | `10` / `2` | `/search` burst / sustained rate |
+| `queryflow.rate-limit.endpoints.trending.capacity` / `.refill-per-second` | `20` / `5` | `/trending/**` burst / sustained rate |
+| `queryflow.cache.circuit-breaker.failure-threshold` | `3` | Consecutive Redis errors before a node's circuit opens |
+| `queryflow.cache.circuit-breaker.open-duration-ms` | `5000` | How long an open node is skipped before a probe |
+| `queryflow.cache.circuit-breaker.probe-interval-ms` | `2000` | Background probe frequency for open circuits |
+| `queryflow.cache.redis.command-timeout-ms` | `500` | Per-command Redis timeout |
 
 ---
 
