@@ -48,13 +48,32 @@ public class FakeRedisServer {
         this.port = port;
     }
 
-    /** Picks a free local port. */
+    private static final java.util.concurrent.atomic.AtomicInteger NEXT_PORT =
+            new java.util.concurrent.atomic.AtomicInteger(20_000 + new java.util.Random().nextInt(5_000));
+
+    /**
+     * Picks a free local port BELOW the usual OS ephemeral range (32768+ on Linux,
+     * 49152+ on Windows/macOS). A port from the ephemeral range can be handed to an
+     * outgoing client socket while the fake node is stopped (including Lettuce's own
+     * reconnect attempts, which can even self-connect), and the node then cannot
+     * re-bind it on restart.
+     */
     public static int freePort() {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
+        for (int i = 0; i < 2_000; i++) {
+            int candidate = NEXT_PORT.getAndIncrement();
+            if (candidate >= 32_000) {
+                NEXT_PORT.set(20_000);
+                continue;
+            }
+            try (ServerSocket s = new ServerSocket()) {
+                s.setReuseAddress(true);
+                s.bind(new InetSocketAddress("127.0.0.1", candidate));
+                return candidate;
+            } catch (IOException busy) {
+                // try the next one
+            }
         }
+        throw new IllegalStateException("No free port found in 20000-31999");
     }
 
     public int getPort() {
@@ -65,13 +84,26 @@ public class FakeRedisServer {
         if (server != null) {
             return;
         }
-        try {
-            ServerSocket ss = new ServerSocket();
-            ss.setReuseAddress(true);
-            ss.bind(new InetSocketAddress("127.0.0.1", port));
-            server = ss;
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot bind fake redis on " + port, e);
+        // Retry briefly: a just-closed connection to this port can hold it for a moment.
+        IOException last = null;
+        for (int attempt = 0; attempt < 50 && server == null; attempt++) {
+            try {
+                ServerSocket ss = new ServerSocket();
+                ss.setReuseAddress(true);
+                ss.bind(new InetSocketAddress("127.0.0.1", port));
+                server = ss;
+            } catch (IOException e) {
+                last = e;
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        if (server == null) {
+            throw new IllegalStateException("Cannot bind fake redis on " + port, last);
         }
         Thread acceptor = new Thread(this::acceptLoop, "fake-redis-" + port);
         acceptor.setDaemon(true);
