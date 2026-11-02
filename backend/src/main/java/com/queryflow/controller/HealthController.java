@@ -1,5 +1,6 @@
 package com.queryflow.controller;
 
+import com.queryflow.cache.ResilientCacheClient;
 import com.queryflow.repository.SearchQueryRepository;
 import com.queryflow.service.ConsistentHashService;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,9 @@ public class HealthController {
     @Autowired
     private ConsistentHashService consistentHashService;
 
+    @Autowired
+    private ResilientCacheClient cacheClient;
+
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
         log.info("Incoming health check request received.");
@@ -40,6 +44,10 @@ public class HealthController {
         
         int ringSize = consistentHashService.getRingSize();
         response.put("cacheRing", ringSize > 0 ? "ACTIVE" : "INACTIVE");
+
+        // FULL / DEGRADED / OFFLINE. Suggestions keep working in every mode (PostgreSQL fallback).
+        response.put("cacheMode", cacheClient.getCacheMode());
+        response.put("cacheNodes", cacheClient.getNodeStatuses());
         
         return ResponseEntity.ok(response);
     }

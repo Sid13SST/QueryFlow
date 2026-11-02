@@ -1,10 +1,12 @@
 package com.queryflow.ratelimit;
 
+import com.queryflow.cache.ResilientCacheClient;
 import com.queryflow.controller.MetricsController;
 import com.queryflow.controller.SearchController;
 import com.queryflow.controller.SuggestionController;
 import com.queryflow.controller.TrendingController;
 import com.queryflow.dto.SuggestionResponse;
+import com.queryflow.service.CacheInvalidationService;
 import com.queryflow.service.MetricsService;
 import com.queryflow.service.SearchService;
 import com.queryflow.service.SuggestionService;
@@ -55,6 +57,10 @@ class RateLimitWebTest {
     private TrendingService trendingService;
     @MockitoBean
     private MetricsService metricsService;
+    @MockitoBean
+    private ResilientCacheClient cacheClient;
+    @MockitoBean
+    private CacheInvalidationService cacheInvalidationService;
 
     @BeforeEach
     void stubServices() {

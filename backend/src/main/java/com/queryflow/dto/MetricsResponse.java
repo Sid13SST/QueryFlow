@@ -23,6 +23,13 @@ public class MetricsResponse {
     private double averageFlushDurationMs;
     private long cacheInvalidations;
 
+    // Cache resilience
+    private String cacheMode;
+    private long cacheDegradedReads;
+    private long cacheShortCircuitedCalls;
+    private long cacheDeferredInvalidations;
+    private Map<String, String> cacheNodeStates;
+
     // Rate limiting (instance-local, see docs/ARCHITECTURE.md)
     private long rateLimitAllowed;
     private long rateLimitRejected;
