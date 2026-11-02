@@ -133,3 +133,62 @@ All cache access goes through `ResilientCacheClient` (`com.queryflow.cache`). Ca
 **Observability.** `/health` reports `cacheMode` (`FULL`, `DEGRADED` or `OFFLINE`) and per-node circuit state, failures, trips, recoveries and pending invalidations. `/metrics` reports `cacheMode`, `cacheDegradedReads`, `cacheShortCircuitedCalls`, `cacheDeferredInvalidations` and `cacheNodeStates`.
 
 **Tests.** `RedisOutageIntegrationTest` runs the whole application (MockMvc, real Lettuce client, H2) against three in-process `FakeRedisServer`s that can be stopped and started. It checks four things: correct answers with every node down, healthy nodes keep hitting with one down, the hit rate returns to 100% after restart, and a healed partition never serves a stale count. `ResilientCacheClientTest` and `CircuitBreakerTest` cover the mechanics. Real-Redis drills are in `scripts/cluster_bench.py --phases outage`.
+
+---
+
+## 9. Horizontal Scaling (2+ instances)
+
+```text
+                       clients
+                          │
+                   nginx :8080 (round robin, X-Forwarded-For)
+                    /                     \
+           backend-1 :8081            backend-2 :8082      (same image, INSTANCE_ID differs)
+              │   \                     /   │
+              │    └──── Redis ring ────┘    │            redis-node-1/2/3 (shared)
+              └──────── PostgreSQL ──────────┘            (shared)
+```
+
+`docker-compose.cluster.yml` runs this topology. `scripts/run-cluster-bench.sh` starts it and benchmarks it.
+
+### What was fixed for multi-instance safety
+
+| Problem | Before | Now |
+|---|---|---|
+| Lost updates | Batch flush loaded `count`, added in Java and saved the absolute value, so two instances flushing the same query overwrote each other | Atomic `count = count + :delta` UPDATE, keys locked in sorted order |
+| Partial commits / double counting | `@Transactional` on a self-invoked method had no effect, so a failure mid-batch committed part of it and then re-buffered all of it | Explicit `TransactionTemplate`; all-or-nothing, so re-buffering is safe |
+| Concurrent first insert of a new query | (unhandled) | Unique constraint rejects one transaction; it rolls back and re-applies through the UPDATE path |
+| Concurrent schema creation / dataset load on an empty DB | Both instances would race | Compose starts `backend-2` after `backend-1` is healthy. Loader re-runs are idempotent (existing queries are skipped) |
+| Attributing traffic and metrics | No instance identity | `INSTANCE_ID` appears in the `X-QueryFlow-Instance` header, `/metrics` and `/health` |
+
+### What stays instance-local, and why that is acceptable
+
+| State | Where | Why it is fine |
+|---|---|---|
+| Search write buffer | `SearchBufferService` (RAM) | Each search reaches exactly one instance and is buffered there once. Flushes are now atomic and commutative, so N buffers flushing independently is correct. The trade-off: up to one flush interval (30 s) of buffered searches on an instance is lost if that instance crashes. This was already true with one instance |
+| Scheduled flush, idle-bucket sweep, cache prober | `@Scheduled` on every instance | Each job only touches that instance's own state or applies commutative DB increments. No leader election is needed |
+| `/metrics` counters (requests, hits, misses, latency, writes, rate-limit counts) | `AtomicLong`s per JVM | Same model as Prometheus: scrape every instance and sum. The response carries `instanceId`; `scripts/cluster_bench.py` sums `/metrics` from all instances |
+| Rate-limit buckets | per JVM | Keeps limiting fully functional when Redis is down. Cost: behind round-robin, one client can get up to N x the configured rate. Configure per-instance limits as `global / N`, or use sticky (`ip_hash`) balancing. Measured: 72 of a 100-request burst allowed with 2 x 30 burst plus refill |
+| Circuit-breaker state and pending invalidations | per JVM | Each instance observes its own connectivity, which is correct for partitions that affect one instance only. Each instance replays only the DELs it failed to send |
+| Cross-instance cache race | n/a | Instance A can read the DB, then instance B flushes and invalidates, then A writes its older read into Redis. The entry is bounded by the 5-minute TTL. This race already existed between a request thread and the flush thread on one instance |
+| `/batch/toggle-outage` debug switch | per JVM | Demo-only fault injection; it affects only the instance that receives it |
+
+### Measured numbers
+
+All numbers below come from one run of `scripts/run-cluster-bench.sh` on a 4-vCPU Linux container (Docker 29, PostgreSQL 16, Redis 7, nginx 1.27). The load generator ran on the same machine. Latencies are client-side through nginx and include Python client overhead, so treat them as relative, not absolute. The dataset is the bundled 10-query CSV, so PostgreSQL answers about as fast as Redis here. The outage numbers demonstrate correctness and availability, not cache speed-up. Your numbers will differ by hardware. Re-run the script to reproduce.
+
+| Scenario (through nginx, 2 instances) | Result |
+|---|---|
+| 5000 `/suggest` over 68 distinct prefixes, 16 concurrent, cold cache | 0 errors; 2500 / 2500 requests per instance; 522.9 req/s; p50 21.4 ms, p95 65.6 ms, p99 134.5 ms |
+| Cluster-wide hit rate for that run | 98.6% (4932 hits / 68 misses). Exactly one miss per distinct prefix across *both* instances, because they share the ring |
+| 2000 concurrent `POST /search` split across instances, 5 s flush | PostgreSQL counts increased by exactly 1000 + 1000 (`exact: true`); 4 write transactions in total (99.8% fewer than one per search) |
+| One Redis node stopped | 0 errors, 0 wrong answers; hit rate 57.4% (the stopped node owned 29 of the 68 prefixes); both instances report `DEGRADED` |
+| All Redis nodes stopped | 0 errors, 0 wrong answers (each answer compared with the pre-outage answer); hit rate 0%; `OFFLINE` |
+| Redis restarted (empty) | Both instances back to `FULL` in 5.9 s (5 s open window + probe); first pass 83.3% (68 refills), second pass 100% |
+| 100-request burst from one client, default limits | 72 allowed, 28 x 429 with `Retry-After: 1`, rejections split 14 / 14 across instances |
+
+Reproduce:
+
+```bash
+scripts/run-cluster-bench.sh          # add --down to remove the containers afterwards
+```
