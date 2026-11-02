@@ -5,6 +5,7 @@ import com.queryflow.repository.SearchQueryRepository;
 import com.queryflow.service.ConsistentHashService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,11 +27,15 @@ public class HealthController {
     @Autowired
     private ResilientCacheClient cacheClient;
 
+    @Value("${queryflow.instance-id:local}")
+    private String instanceId;
+
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
         log.info("Incoming health check request received.");
         Map<String, Object> response = new HashMap<>();
         response.put("status", "UP");
+        response.put("instanceId", instanceId);
         
         try {
             searchQueryRepository.count();

@@ -12,6 +12,8 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MetricsResponse {
+    /** Which backend produced these numbers. All counters below are for this instance only. */
+    private String instanceId;
     private long suggestionRequests;
     private long trendingRequests;
     private long cacheHits;

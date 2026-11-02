@@ -9,6 +9,7 @@ import com.queryflow.service.CacheInvalidationService;
 import com.queryflow.service.MetricsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,6 +29,9 @@ public class MetricsController {
     @Autowired
     private RateLimiterService rateLimiterService;
 
+    @Value("${queryflow.instance-id:local}")
+    private String instanceId;
+
     @Autowired
     private ResilientCacheClient cacheClient;
 
@@ -38,6 +42,7 @@ public class MetricsController {
     public ResponseEntity<MetricsResponse> getMetrics() {
         log.info("GET /metrics requested");
         MetricsResponse response = MetricsResponse.builder()
+                .instanceId(instanceId)
                 .suggestionRequests(metricsService.getSuggestionRequests())
                 .trendingRequests(metricsService.getTrendingRequests())
                 .cacheHits(metricsService.getCacheHits())

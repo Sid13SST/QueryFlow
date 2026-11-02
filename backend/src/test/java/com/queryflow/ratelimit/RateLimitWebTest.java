@@ -41,7 +41,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "queryflow.rate-limit.endpoints.search.capacity=2",
                 "queryflow.rate-limit.endpoints.search.refill-per-second=0.1",
                 "queryflow.rate-limit.endpoints.trending.capacity=2",
-                "queryflow.rate-limit.endpoints.trending.refill-per-second=0.1"
+                "queryflow.rate-limit.endpoints.trending.refill-per-second=0.1",
+                "queryflow.instance-id=test-instance"
         })
 @Import(RateLimitConfig.class)
 class RateLimitWebTest {
@@ -134,7 +135,9 @@ class RateLimitWebTest {
                 .andExpect(jsonPath("$.rateLimitAllowed").value(org.hamcrest.Matchers.greaterThanOrEqualTo(3)))
                 .andExpect(jsonPath("$.rateLimitByEndpoint.suggest.rejected")
                         .value(org.hamcrest.Matchers.greaterThanOrEqualTo(2)))
-                .andExpect(jsonPath("$.rateLimitTrackedBuckets").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)));
+                .andExpect(jsonPath("$.rateLimitTrackedBuckets").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.instanceId").value("test-instance"))
+                .andExpect(header().string("X-QueryFlow-Instance", "test-instance"));
     }
 
     @Test
