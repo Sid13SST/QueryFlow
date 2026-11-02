@@ -2,6 +2,7 @@ package com.queryflow.controller;
 
 import com.queryflow.dto.MetricsLatencyResponse;
 import com.queryflow.dto.MetricsResponse;
+import com.queryflow.ratelimit.RateLimiterService;
 import com.queryflow.service.MetricsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,9 @@ public class MetricsController {
     @Autowired
     private MetricsService metricsService;
 
+    @Autowired
+    private RateLimiterService rateLimiterService;
+
     @GetMapping("/metrics")
     public ResponseEntity<MetricsResponse> getMetrics() {
         log.info("GET /metrics requested");
@@ -32,6 +36,10 @@ public class MetricsController {
                 .batchFlushes(metricsService.getBatchFlushCount())
                 .averageFlushDurationMs(metricsService.getAverageFlushDurationMs())
                 .cacheInvalidations(metricsService.getCacheInvalidations())
+                .rateLimitAllowed(rateLimiterService.getTotalAllowed())
+                .rateLimitRejected(rateLimiterService.getTotalRejected())
+                .rateLimitTrackedBuckets(rateLimiterService.getTrackedBuckets())
+                .rateLimitByEndpoint(rateLimiterService.getCountersByRule())
                 .build();
         return ResponseEntity.ok(response);
     }
