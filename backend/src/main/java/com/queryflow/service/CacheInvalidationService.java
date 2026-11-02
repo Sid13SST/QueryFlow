@@ -1,6 +1,6 @@
 package com.queryflow.service;
 
-import com.queryflow.dto.CacheNode;
+import com.queryflow.cache.ResilientCacheClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -36,9 +36,10 @@ public class CacheInvalidationService {
     private PrefixGeneratorService prefixGeneratorService;
 
     @Autowired
-    private ConsistentHashService consistentHashService;
+    private ResilientCacheClient cacheClient;
 
     private final AtomicLong invalidationCount = new AtomicLong(0);
+    private final AtomicLong deferredInvalidationCount = new AtomicLong(0);
     private volatile LocalDateTime lastInvalidationTime;
 
     public void invalidateQueries(Collection<String> queries) {
@@ -48,41 +49,37 @@ public class CacheInvalidationService {
 
         for (String query : queries) {
             for (String prefix : prefixGeneratorService.generatePrefixes(query)) {
-                String key = "suggest:" + prefix;
-                CacheNode node = consistentHashService.route(key);
-                if (node != null) {
-                    try {
-                        node.getRedisTemplate().delete(key);
-                        invalidationCount.incrementAndGet();
-                        lastInvalidationTime = LocalDateTime.now();
-                        log.info("CACHE INVALIDATED prefix={} node={}", prefix, node.getNodeId());
-                    } catch (Exception e) {
-                        log.warn("Failed to delete key '{}' on node '{}' during query invalidation: {}", 
-                                key, node.getNodeId(), e.getMessage());
-                    }
-                }
+                invalidateKey("suggest:" + prefix);
             }
         }
     }
 
     public void invalidateTrending() {
-        String key = "trending:top";
-        CacheNode node = consistentHashService.route(key);
-        if (node != null) {
-            try {
-                node.getRedisTemplate().delete(key);
-                invalidationCount.incrementAndGet();
-                lastInvalidationTime = LocalDateTime.now();
-                log.info("TRENDING CACHE INVALIDATED");
-            } catch (Exception e) {
-                log.warn("Failed to delete key '{}' on node '{}' during trending invalidation: {}", 
-                        key, node.getNodeId(), e.getMessage());
-            }
+        invalidateKey("trending:top");
+    }
+
+    /**
+     * Deletes one key on its owning node. If the node is unreachable the client
+     * queues the DEL and replays it before the node serves reads again, so the
+     * invalidation is deferred rather than lost.
+     */
+    private void invalidateKey(String key) {
+        if (cacheClient.delete(key)) {
+            invalidationCount.incrementAndGet();
+            lastInvalidationTime = LocalDateTime.now();
+            log.info("CACHE INVALIDATED key={}", key);
+        } else {
+            deferredInvalidationCount.incrementAndGet();
+            log.warn("CACHE INVALIDATION DEFERRED key={} (owning node unavailable)", key);
         }
     }
 
     public long getInvalidationCount() {
         return invalidationCount.get();
+    }
+
+    public long getDeferredInvalidationCount() {
+        return deferredInvalidationCount.get();
     }
 
     public LocalDateTime getLastInvalidationTime() {

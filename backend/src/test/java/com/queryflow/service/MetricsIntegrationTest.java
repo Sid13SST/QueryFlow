@@ -47,7 +47,7 @@ class MetricsIntegrationTest {
         
         cacheInvalidationService = new CacheInvalidationService();
         ReflectionTestUtils.setField(cacheInvalidationService, "prefixGeneratorService", prefixGeneratorService);
-        ReflectionTestUtils.setField(cacheInvalidationService, "consistentHashService", consistentHashService);
+        ReflectionTestUtils.setField(cacheInvalidationService, "cacheClient", new ResilientCacheClient(consistentHashService));
         
         metricsService = new MetricsService();
         ReflectionTestUtils.setField(metricsService, "cacheMetricsService", cacheMetricsService);

@@ -1,5 +1,7 @@
 package com.queryflow.service;
 
+import com.queryflow.cache.ResilientCacheClient;
+
 import com.queryflow.controller.CacheInvalidationController;
 import com.queryflow.dto.CacheInvalidationStatsResponse;
 import com.queryflow.dto.CacheNode;
@@ -56,7 +58,7 @@ class CacheInvalidationServiceTest {
                 .build();
 
         ReflectionTestUtils.setField(cacheInvalidationService, "prefixGeneratorService", prefixGeneratorService);
-        ReflectionTestUtils.setField(cacheInvalidationService, "consistentHashService", consistentHashService);
+        ReflectionTestUtils.setField(cacheInvalidationService, "cacheClient", new ResilientCacheClient(consistentHashService));
         ReflectionTestUtils.setField(cacheInvalidationController, "cacheInvalidationService", cacheInvalidationService);
     }
 
