@@ -17,7 +17,7 @@ A: We created a functional index on `LOWER(query)` so case-insensitive prefix qu
 
 **Q: What are the scaling limits?**
 
-A: PostgreSQL comfortably handles millions of rows with proper indexing. With our batch write system, write load is reduced by ~97% (1000 searches → ~1 bulk write), so write throughput is not a bottleneck. For read-heavy workloads (autocomplete), the distributed Redis cache absorbs the majority of reads, keeping PostgreSQL under low load.
+A: PostgreSQL comfortably handles millions of rows with proper indexing. With our batch write system, searches are aggregated in memory and written once per flush. In the cluster benchmark (`scripts/run-cluster-bench.sh`, 2 instances, 5 s flush interval), 2000 searches produced 4 write transactions (99.8% fewer than one per search). The exact reduction depends on traffic × flush interval, but write throughput is not a bottleneck. For read-heavy workloads (autocomplete), the distributed Redis cache absorbs the majority of reads, keeping PostgreSQL under low load.
 
 ---
 
