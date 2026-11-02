@@ -12,3 +12,5 @@ Thumbs.db
 .env.local
 .env.*.local
 
+bench-results/
+__pycache__/
