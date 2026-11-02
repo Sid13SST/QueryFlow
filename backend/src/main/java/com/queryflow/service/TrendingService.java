@@ -1,7 +1,7 @@
 package com.queryflow.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.queryflow.dto.CacheNode;
+import com.queryflow.cache.ResilientCacheClient;
 import com.queryflow.dto.TrendingExplainResponse;
 import com.queryflow.dto.TrendingResponse;
 import com.queryflow.entity.SearchQuery;
@@ -10,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -38,7 +37,7 @@ public class TrendingService {
     private SearchQueryRepository searchQueryRepository;
 
     @Autowired
-    private ConsistentHashService consistentHashService;
+    private ResilientCacheClient cacheClient;
 
     @Autowired
     private CacheMetricsService cacheMetricsService;
@@ -51,7 +50,6 @@ public class TrendingService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @SuppressWarnings("unchecked")
     public List<TrendingResponse> getTrending() {
         long startTime = System.currentTimeMillis();
         metricsService.incrementTrendingRequests();
@@ -60,27 +58,16 @@ public class TrendingService {
             log.info("TRENDING REQUEST");
             
             String cacheKey = "trending:top";
-            CacheNode targetNode = consistentHashService.route(cacheKey);
-
-            if (targetNode != null) {
-                log.info("trendingKey={} routedTo={}", cacheKey, targetNode.getNodeId());
-                RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
-                try {
-                    Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
-                    if (cachedObj instanceof List) {
-                        log.info("TRENDING CACHE HIT");
-                        cacheMetricsService.incrementHits();
-                        
-                        List<?> cachedList = (List<?>) cachedObj;
-                        return cachedList.stream()
-                                .map(item -> objectMapper.convertValue(item, TrendingResponse.class))
-                                .collect(Collectors.toList());
-                    }
-                } catch (Exception e) {
-                    log.warn("TRENDING CACHE FALLBACK: Error reading from Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
-                }
-            } else {
-                log.warn("TRENDING CACHE FALLBACK: No cache nodes available in consistent hash ring");
+            ResilientCacheClient.CacheRead cached = cacheClient.get(cacheKey);
+            if (cached.isHit() && cached.value() instanceof List<?> cachedList) {
+                log.info("TRENDING CACHE HIT");
+                cacheMetricsService.incrementHits();
+                return cachedList.stream()
+                        .map(item -> objectMapper.convertValue(item, TrendingResponse.class))
+                        .collect(Collectors.toList());
+            }
+            if (cached.outcome() == ResilientCacheClient.Outcome.UNAVAILABLE) {
+                log.warn("TRENDING CACHE UNAVAILABLE - serving from PostgreSQL");
             }
 
             log.info("TRENDING CACHE MISS");
@@ -127,14 +114,8 @@ public class TrendingService {
                     .limit(limit)
                     .collect(Collectors.toList());
 
-            if (targetNode != null) {
-                RedisTemplate<String, Object> redisTemplate = targetNode.getRedisTemplate();
-                try {
-                    log.info("TRENDING CACHE STORE in node {}", targetNode.getNodeId());
-                    redisTemplate.opsForValue().set(cacheKey, result, ttlMinutes, TimeUnit.MINUTES);
-                } catch (Exception e) {
-                    log.warn("TRENDING CACHE FALLBACK: Error writing to Redis node {}: {}", targetNode.getNodeId(), e.getMessage());
-                }
+            if (cached.outcome() != ResilientCacheClient.Outcome.UNAVAILABLE) {
+                cacheClient.set(cacheKey, result, ttlMinutes, TimeUnit.MINUTES);
             }
 
             return result;

@@ -63,7 +63,7 @@ class MetricsIntegrationTest {
 
         trendingService = new TrendingService();
         ReflectionTestUtils.setField(trendingService, "searchQueryRepository", searchQueryRepository);
-        ReflectionTestUtils.setField(trendingService, "consistentHashService", consistentHashService);
+        ReflectionTestUtils.setField(trendingService, "cacheClient", new ResilientCacheClient(consistentHashService));
         ReflectionTestUtils.setField(trendingService, "cacheMetricsService", cacheMetricsService);
         ReflectionTestUtils.setField(trendingService, "trendingScoreService", trendingScoreService);
         ReflectionTestUtils.setField(trendingService, "metricsService", metricsService);

@@ -1,5 +1,7 @@
 package com.queryflow.service;
 
+import com.queryflow.cache.ResilientCacheClient;
+
 import com.queryflow.dto.CacheNode;
 import com.queryflow.dto.TrendingExplainResponse;
 import com.queryflow.dto.TrendingResponse;
@@ -67,7 +69,7 @@ class TrendingServiceTest {
         ReflectionTestUtils.setField(trendingService, "ttlMinutes", 5);
         ReflectionTestUtils.setField(trendingService, "candidateLimit", 500);
         ReflectionTestUtils.setField(trendingService, "searchQueryRepository", searchQueryRepository);
-        ReflectionTestUtils.setField(trendingService, "consistentHashService", consistentHashService);
+        ReflectionTestUtils.setField(trendingService, "cacheClient", new ResilientCacheClient(consistentHashService));
         ReflectionTestUtils.setField(trendingService, "cacheMetricsService", cacheMetricsService);
         ReflectionTestUtils.setField(trendingService, "trendingScoreService", trendingScoreService);
         ReflectionTestUtils.setField(trendingService, "metricsService", metricsService);
