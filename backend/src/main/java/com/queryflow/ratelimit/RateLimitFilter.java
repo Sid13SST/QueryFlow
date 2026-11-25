@@ -24,11 +24,11 @@ import java.util.Optional;
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private final RateLimiterService rateLimiter;
-    private final RateLimitProperties properties;
+    private final ClientIpResolver clientIpResolver;
 
-    public RateLimitFilter(RateLimiterService rateLimiter, RateLimitProperties properties) {
+    public RateLimitFilter(RateLimiterService rateLimiter, ClientIpResolver clientIpResolver) {
         this.rateLimiter = rateLimiter;
-        this.properties = properties;
+        this.clientIpResolver = clientIpResolver;
     }
 
     @Override
@@ -46,7 +46,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        String clientIp = resolveClientIp(request);
+        String clientIp = clientIpResolver.resolve(request);
         TokenBucket.Result result = rateLimiter.tryAcquire(rule.get(), clientIp);
         long limit = rateLimiter.getRule(rule.get()).getCapacity();
         response.setHeader("X-RateLimit-Limit", String.valueOf(limit));
@@ -68,20 +68,5 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write("{\"message\":\"Too many requests\",\"endpoint\":\"" + rule.get()
                 + "\",\"retryAfterSeconds\":" + retryAfter + "}");
-    }
-
-    String resolveClientIp(HttpServletRequest request) {
-        if (properties.isTrustForwardedHeader()) {
-            String header = request.getHeader(properties.getForwardedHeader());
-            if (header != null && !header.isBlank()) {
-                // Right-most entry = address seen by our own proxy; earlier entries are client-controlled.
-                String[] parts = header.split(",");
-                String candidate = parts[parts.length - 1].trim();
-                if (!candidate.isEmpty()) {
-                    return candidate;
-                }
-            }
-        }
-        return request.getRemoteAddr();
     }
 }

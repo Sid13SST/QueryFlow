@@ -108,6 +108,26 @@ Details the raw metrics and calculated popularity vs. recency components for a q
 
 ## 2. Observability & Diagnostics
 
+### Rate Limit Client Check
+Shows how the rate limiter identifies the caller. Use it after deploying behind a proxy: two different visitors must see different `clientIp` values, and sending your own `X-Forwarded-For` must not change yours. Only the caller's own address is returned. Not rate limited.
+
+* **URL**: `/ratelimit/client`
+* **Method**: `GET`
+* **Response Example (200 OK)**:
+  ```json
+  {
+    "clientIp": "198.51.100.9",
+    "source": "CLIENT_IP_HEADER",
+    "enabled": true,
+    "limits": {
+      "suggest": { "paths": ["/suggest"], "burst": 30, "refillPerSecond": 10.0 },
+      "search": { "paths": ["/search"], "burst": 10, "refillPerSecond": 2.0 },
+      "trending": { "paths": ["/trending", "/trending/**"], "burst": 20, "refillPerSecond": 5.0 }
+    }
+  }
+  ```
+  `source` is `CLIENT_IP_HEADER`, `FORWARDED_FOR` or `REMOTE_ADDR`.
+
 ### Get Global System Metrics
 Provides telemetry for API traffic, cache hit rates, DB reads/writes, write flushes, cache resilience and rate limiting. **All counters are for the instance named in `instanceId`**; sum them across instances for cluster totals. `databaseWrites` counts batch write transactions (one per non-empty flush).
 

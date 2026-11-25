@@ -17,10 +17,15 @@ public class RateLimitConfig {
     }
 
     @Bean
+    public ClientIpResolver clientIpResolver(RateLimitProperties properties) {
+        return new ClientIpResolver(properties);
+    }
+
+    @Bean
     public FilterRegistrationBean<RateLimitFilter> rateLimitFilter(RateLimiterService rateLimiterService,
-                                                                   RateLimitProperties properties) {
+                                                                   ClientIpResolver clientIpResolver) {
         FilterRegistrationBean<RateLimitFilter> registration =
-                new FilterRegistrationBean<>(new RateLimitFilter(rateLimiterService, properties));
+                new FilterRegistrationBean<>(new RateLimitFilter(rateLimiterService, clientIpResolver));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         registration.setName("rateLimitFilter");

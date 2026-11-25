@@ -276,7 +276,7 @@ All settings are externalized in `application.properties` with environment varia
 
 | Property | Default | Description |
 |---|---|---|
-| `server.port` | `8080` | Backend port |
+| `server.port` | `$PORT` / `$SERVER_PORT` / `8080` | Backend port (`PORT` is set by Render) |
 | `queryflow.batch.flush-interval-seconds` | `30` | Batch flush frequency |
 | `queryflow.trending.limit` | `10` | Number of trending results |
 | `queryflow.trending.popularity-weight` | `0.7` | Popularity score weight |
@@ -285,7 +285,9 @@ All settings are externalized in `application.properties` with environment varia
 | `queryflow.trending.cache.ttl-minutes` | `5` | Cache TTL safety net |
 | `queryflow.instance-id` | `$INSTANCE_ID` / hostname | Instance name in `/metrics`, `/health`, `X-QueryFlow-Instance` |
 | `queryflow.rate-limit.enabled` | `true` | Master switch (`RATE_LIMIT_ENABLED`) |
-| `queryflow.rate-limit.trust-forwarded-header` | `false` | Use right-most `X-Forwarded-For` as client IP (`RATE_LIMIT_TRUST_FORWARDED`) |
+| `queryflow.rate-limit.trust-forwarded-header` | `false` | Take the client IP from proxy headers (`RATE_LIMIT_TRUST_FORWARDED`) |
+| `queryflow.rate-limit.trusted-proxy-hops` | `1` | Proxies appending to `X-Forwarded-For`; client = N-th entry from the right (`RATE_LIMIT_TRUSTED_PROXY_HOPS`) |
+| `queryflow.rate-limit.client-ip-header` | _(empty)_ | Edge-set header that wins over `X-Forwarded-For`, e.g. `CF-Connecting-IP` on Render (`RATE_LIMIT_CLIENT_IP_HEADER`) |
 | `queryflow.rate-limit.endpoints.suggest.capacity` / `.refill-per-second` | `30` / `10` | `/suggest` burst / sustained rate |
 | `queryflow.rate-limit.endpoints.search.capacity` / `.refill-per-second` | `10` / `2` | `/search` burst / sustained rate |
 | `queryflow.rate-limit.endpoints.trending.capacity` / `.refill-per-second` | `20` / `5` | `/trending/**` burst / sustained rate |
