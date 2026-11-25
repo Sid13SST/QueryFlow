@@ -104,7 +104,18 @@ CORS: all API controllers allow any origin (`@CrossOrigin("*")`), including pref
 * **Render free limits:** a monthly cap on free instance hours (one always-awake service fits) and on build minutes; no SSH or persistent disk. Plans change, so check the current free tier pages of Render, Neon and Vercel.
 * **One instance.** The multi-backend nginx setup (`docker-compose.cluster.yml`) is for local benchmarks; the free demo runs one backend, so `X-QueryFlow-Instance` is always `render-free`.
 
-## 5. Run the Render image locally
+## 5. Troubleshooting the Render service
+
+The container log on Render starts with `[entrypoint]` lines:
+
+* `runtime dir: /tmp/queryflow (user queryflow)`: where Redis and the JVM keep runtime files. It is created at start-up, because Render mounts a fresh, empty `/tmp` that hides anything the image put there. If `/tmp` is not writable, `/app/run` (created in the image for the runtime user) is used instead.
+* `redis-node-N on 127.0.0.1:PORT is up` for all three nodes, then `starting the API on port 10000`.
+* If a node cannot start, the container stops with `ERROR: redis-node-N (127.0.0.1:PORT, pid ...) exited during start-up`, and Redis's own reason is printed just above it.
+* `WARNING Memory overcommit must be enabled!` from Redis is expected and harmless: it concerns background saves, which are disabled here (no persistence).
+
+The runtime image is pinned to `eclipse-temurin:21-jre-resolute` (Ubuntu 26.04, `redis-server` 8.0), so a moving base tag cannot change the Redis major version under the deployment.
+
+## 6. Run the Render image locally
 
 ```bash
 docker build -f Dockerfile.render -t queryflow-render .
