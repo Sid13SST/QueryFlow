@@ -66,7 +66,7 @@ export default function TrendingSearches({ onSelect, enabled = true, onUnreachab
               onClick={() => onSelect(item.query)}
               className="group px-3 py-1.5 rounded-full bg-slate-900/60 border border-slate-800/60 hover:border-indigo-500/30 hover:bg-indigo-950/10 active:scale-95 transition-all duration-200 cursor-pointer flex items-center gap-2 shadow-sm text-left"
             >
-              <span className="text-[10px] font-mono font-bold w-4 h-4 flex items-center justify-center rounded bg-slate-950 text-slate-500 group-hover:text-indigo-400 group-hover:bg-indigo-500/10 transition-colors border border-slate-850">
+              <span className="text-[10px] font-mono font-bold w-4 h-4 flex items-center justify-center rounded bg-slate-950 text-slate-500 group-hover:text-indigo-400 group-hover:bg-indigo-500/10 transition-colors border border-slate-800">
                 {idx + 1}
               </span>
               <span className="text-xs text-slate-300 group-hover:text-white font-light transition-colors">

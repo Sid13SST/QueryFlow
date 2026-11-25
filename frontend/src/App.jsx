@@ -282,7 +282,7 @@ function App() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto w-full pt-6">
             
             {/* Health Card */}
-            <div className="p-8 rounded-3xl bg-slate-900/20 border border-slate-800/60 backdrop-blur-xl shadow-2xl flex flex-col justify-between text-left hover:border-slate-700/60 transition-colors duration-300">
+            <div className="p-5 sm:p-8 rounded-3xl bg-slate-900/20 border border-slate-800/60 backdrop-blur-xl shadow-2xl flex flex-col justify-between text-left hover:border-slate-700/60 transition-colors duration-300">
               <div className="space-y-2">
                 <h3 className="text-lg font-bold text-slate-200 font-sans">System Health</h3>
                 <p className="text-sm text-slate-400 font-light font-sans">Verify connection connectivity to QueryFlow's Java backend endpoints.</p>
@@ -340,7 +340,7 @@ function App() {
 
                 {/* Write Buffer Status */}
                 {batchInfo && (
-                  <div className="mt-4 p-4 rounded-2xl bg-slate-950/40 border border-slate-850/40 text-xs text-slate-400 space-y-2 animate-fadeIn">
+                  <div className="mt-4 p-4 rounded-2xl bg-slate-950/40 border border-slate-800/40 text-xs text-slate-400 space-y-2 animate-fadeIn">
                     <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Write Buffer Status</div>
                     <div className="flex justify-between">
                       <span>Pending Events:</span>
@@ -360,7 +360,7 @@ function App() {
                 )}
                 {/* Cache Invalidation Stats */}
                 {invalidationInfo && (
-                  <div className="mt-3 p-4 rounded-2xl bg-slate-950/40 border border-slate-850/40 text-xs text-slate-400 space-y-2 animate-fadeIn">
+                  <div className="mt-3 p-4 rounded-2xl bg-slate-950/40 border border-slate-800/40 text-xs text-slate-400 space-y-2 animate-fadeIn">
                     <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Cache Invalidation</div>
                     <div className="flex justify-between">
                       <span>Invalidation Events:</span>
@@ -378,7 +378,7 @@ function App() {
             </div>
 
             {/* Stats Card */}
-            <div className="p-8 rounded-3xl bg-slate-900/20 border border-slate-800/60 backdrop-blur-xl shadow-2xl flex flex-col justify-between text-left hover:border-slate-700/60 transition-colors duration-300">
+            <div className="p-5 sm:p-8 rounded-3xl bg-slate-900/20 border border-slate-800/60 backdrop-blur-xl shadow-2xl flex flex-col justify-between text-left hover:border-slate-700/60 transition-colors duration-300">
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-bold text-slate-200 font-sans">Dataset Statistics</h3>
@@ -442,7 +442,7 @@ function App() {
 
           {/* Cache Ring & Metrics Dashboard Card */}
           <div className="max-w-5xl mx-auto w-full pt-4">
-            <div className="p-8 rounded-3xl bg-slate-900/20 border border-slate-800/60 backdrop-blur-xl shadow-2xl hover:border-slate-700/60 transition-colors duration-300 text-left">
+            <div className="p-5 sm:p-8 rounded-3xl bg-slate-900/20 border border-slate-800/60 backdrop-blur-xl shadow-2xl hover:border-slate-700/60 transition-colors duration-300 text-left">
               
               {/* Header inside Dashboard Card */}
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-6 border-b border-slate-900/80">
@@ -497,25 +497,25 @@ function App() {
                 <div className="lg:col-span-7 space-y-6">
                   
                   {/* Performance stats cards */}
-                  <div className="grid grid-cols-3 gap-4 font-sans">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-4 font-sans">
                     {/* Hit Rate */}
-                    <div className="p-4 rounded-2xl bg-slate-950/50 border border-slate-850/60 shadow-inner flex flex-col justify-between">
+                    <div className="min-w-0 p-3 sm:p-4 rounded-2xl bg-slate-950/50 border border-slate-800/60 shadow-inner flex flex-col justify-between">
                       <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Hit Rate</span>
-                      <span className="text-3xl font-black text-indigo-400 mt-1">
+                      <span className="text-xl sm:text-3xl font-black text-indigo-400 mt-1 break-all">
                         {cacheInfo ? `${cacheInfo.hitRate}%` : '—'}
                       </span>
                     </div>
                     {/* Hits */}
-                    <div className="p-4 rounded-2xl bg-slate-950/50 border border-slate-850/60 shadow-inner flex flex-col justify-between">
+                    <div className="min-w-0 p-3 sm:p-4 rounded-2xl bg-slate-950/50 border border-slate-800/60 shadow-inner flex flex-col justify-between">
                       <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Total Hits</span>
-                      <span className="text-2xl font-bold text-emerald-400 mt-1 font-mono">
+                      <span className="text-lg sm:text-2xl font-bold text-emerald-400 mt-1 font-mono break-all">
                         {cacheInfo ? cacheInfo.hits : '—'}
                       </span>
                     </div>
                     {/* Misses */}
-                    <div className="p-4 rounded-2xl bg-slate-950/50 border border-slate-850/60 shadow-inner flex flex-col justify-between">
+                    <div className="min-w-0 p-3 sm:p-4 rounded-2xl bg-slate-950/50 border border-slate-800/60 shadow-inner flex flex-col justify-between">
                       <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Total Misses</span>
-                      <span className="text-2xl font-bold text-rose-400 mt-1 font-mono">
+                      <span className="text-lg sm:text-2xl font-bold text-rose-400 mt-1 font-mono break-all">
                         {cacheInfo ? cacheInfo.misses : '—'}
                       </span>
                     </div>
@@ -803,7 +803,7 @@ function App() {
       {/* Footer */}
       <footer className="w-full max-w-7xl mx-auto px-6 py-8 border-t border-slate-900/60 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-slate-500 z-10 font-sans">
         <p>&copy; {new Date().getFullYear()} QueryFlow. All rights reserved.</p>
-        <div className="flex gap-6">
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
           <span className="hover:text-indigo-400 transition-colors cursor-pointer">Distributed Systems</span>
           <span className="hover:text-indigo-400 transition-colors cursor-pointer">Consistent Hashing</span>
           <span className="hover:text-indigo-400 transition-colors cursor-pointer">Spring & React</span>
