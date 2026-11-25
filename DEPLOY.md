@@ -71,9 +71,9 @@ Every Render service sits behind Cloudflare, and Render's proxy appends the Clou
 Verify after deploying:
 ```bash
 curl https://queryflow-backend.onrender.com/ratelimit/client
-curl -H "X-Forwarded-For: 1.2.3.4" -H "CF-Connecting-IP: 1.2.3.4" https://queryflow-backend.onrender.com/ratelimit/client
+curl -H "X-Forwarded-For: 1.2.3.4" https://queryflow-backend.onrender.com/ratelimit/client
 ```
-Both must show **your** public IP with `"source":"CLIENT_IP_HEADER"`; the forged headers must not change it.
+Both must show **your** public IP with `"source":"CLIENT_IP_HEADER"`; the forged `X-Forwarded-For` must not change it. A request that forges `CF-Connecting-IP` itself is rejected by Cloudflare with HTTP 403 before it reaches the app.
 
 Default limits per visitor (token bucket, burst then sustained rate; over the limit returns HTTP 429 with `Retry-After`):
 
@@ -115,7 +115,19 @@ The container log on Render starts with `[entrypoint]` lines:
 
 The runtime image is pinned to `eclipse-temurin:21-jre-resolute` (Ubuntu 26.04, `redis-server` 8.0), so a moving base tag cannot change the Redis major version under the deployment.
 
-## 6. Run the Render image locally
+## 6. Verified on a live Render free instance (2026-11-25)
+
+Commit `3c6c27d` was deployed with the Blueprint to a free Render web service (`https://queryflow-api.onrender.com`) backed by Neon. Checks on the live host:
+
+* `/health`: `"status":"UP"`, `"database":"CONNECTED"`, all 3 Redis nodes in state `CLOSED`.
+* `/suggest`, `POST /search` and `/trending` return real data.
+* A forged `X-Forwarded-For` does not change the client address reported by `/ratelimit/client`.
+* A forged `CF-Connecting-IP` header is rejected by Cloudflare with HTTP 403 before it reaches the app.
+* A burst of 45 `POST /search` requests got 10 × 200, then 429 (the `/search` burst limit is 10).
+
+The first deploy failed before the API started: Redis would not start because its working directory (`/tmp/redis`, created in the image) did not exist in the running container. Render mounts a fresh `/tmp` at runtime. This only showed up on Render, not in the local Docker runs, and is fixed in `3c6c27d` (runtime directories are created by the entrypoint at start-up; see section 5).
+
+## 7. Run the Render image locally
 
 ```bash
 docker build -f Dockerfile.render -t queryflow-render .
