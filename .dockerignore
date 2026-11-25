@@ -1,0 +1,6 @@
+# Context for Dockerfile.render (repository root): only the backend sources and the
+# Render entrypoint are needed. backend/Dockerfile uses backend/ as its own context.
+*
+!backend/pom.xml
+!backend/src/
+!deploy/render/
