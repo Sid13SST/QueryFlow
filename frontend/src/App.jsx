@@ -3,6 +3,8 @@ import axiosClient from './api/axiosClient';
 import SearchBox from './components/SearchBox';
 import TrendingSearches from './components/TrendingSearches';
 import DeveloperDashboard from './components/DeveloperDashboard';
+import BackendStatusBanner from './components/BackendStatusBanner';
+import useBackendStatus from './hooks/useBackendStatus';
 import logo from './assets/logo.svg';
 
 const vNodeCount = 30;
@@ -55,7 +57,12 @@ const physicalNodes = [
   }
 ];
 
+const WAKING_MESSAGE = 'The backend is still starting (free-tier cold start). It will retry automatically.';
+
 function App() {
+  const backend = useBackendStatus();
+  const { ready: backendReady, reportUnreachable } = backend;
+
   const [healthInfo, setHealthInfo] = useState(null);
   const [healthError, setHealthError] = useState(null);
   const [isHealthLoading, setIsHealthLoading] = useState(false);
@@ -87,7 +94,12 @@ function App() {
       const response = await axiosClient.get('/health');
       setHealthInfo(response.data);
     } catch (error) {
-      setHealthError(error.message || 'Failed to reach backend server');
+      if (error.unreachable) {
+        reportUnreachable();
+        setHealthError(WAKING_MESSAGE);
+      } else {
+        setHealthError(error.message || 'Failed to reach backend server');
+      }
     } finally {
       setIsHealthLoading(false);
     }
@@ -101,7 +113,8 @@ function App() {
       const response = await axiosClient.get('/dataset/stats');
       setStatsInfo(response.data);
     } catch (error) {
-      setStatsError(error.message || 'Failed to fetch dataset stats');
+      if (error.unreachable) reportUnreachable();
+      setStatsError(error.unreachable ? WAKING_MESSAGE : (error.message || 'Failed to fetch dataset stats'));
     } finally {
       setIsStatsLoading(false);
     }
@@ -140,21 +153,23 @@ function App() {
         setBenchmarkInfo(benchmarkRes.data);
       }
     } catch (error) {
-      setCacheError(error.message || 'Failed to fetch cache stats');
+      if (error.unreachable) reportUnreachable();
+      setCacheError(error.unreachable ? WAKING_MESSAGE : (error.message || 'Failed to fetch cache stats'));
     } finally {
       if (showLoader) setIsCacheLoading(false);
     }
   };
 
-  // Fetch stats on load
+  // Fetch stats once the backend is reachable (it may be cold-starting on first visit)
   useEffect(() => {
+    if (!backendReady) return;
     fetchStats();
     fetchCacheStats(true);
-  }, []);
+  }, [backendReady]);
 
   // Auto-refresh logic
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefresh || !backendReady) return;
     
     // Polling interval
     const interval = setInterval(() => {
@@ -162,7 +177,7 @@ function App() {
     }, 3000);
     
     return () => clearInterval(interval);
-  }, [autoRefresh]);
+  }, [autoRefresh, backendReady]);
 
   // Check if a node is offline based on distribution info
   const isNodeOffline = (nodeId) => {
@@ -250,10 +265,17 @@ function App() {
             </div>
           </div>
 
+          {/* Free-tier cold start notice */}
+          <BackendStatusBanner status={backend.status} elapsedSeconds={backend.elapsedSeconds} onRetry={backend.retry} />
+
           {/* Search Box Component */}
           <div className="py-2 max-w-xl mx-auto w-full">
-            <SearchBox trigger={searchTrigger} />
-            <TrendingSearches onSelect={(q) => setSearchTrigger({ query: q, timestamp: Date.now() })} />
+            <SearchBox trigger={searchTrigger} backendReady={backendReady} onUnreachable={reportUnreachable} />
+            <TrendingSearches
+              enabled={backendReady}
+              onUnreachable={reportUnreachable}
+              onSelect={(q) => setSearchTrigger({ query: q, timestamp: Date.now() })}
+            />
           </div>
 
           {/* System Control Cards */}
@@ -410,7 +432,7 @@ function App() {
                   </div>
                 ) : (
                   <div className="h-24 flex items-center justify-center text-slate-500 text-sm font-sans">
-                    No statistics data available.
+                    {backendReady ? 'No statistics data available.' : 'Waiting for the backend to wake up…'}
                   </div>
                 )}
               </div>
@@ -602,7 +624,7 @@ function App() {
                       </div>
                     ) : (
                       <div className="h-24 flex items-center justify-center text-slate-500 text-sm font-sans">
-                        No cache statistics available.
+                        {backendReady ? 'No cache statistics available.' : 'Waiting for the backend to wake up…'}
                       </div>
                     )}
                   </div>

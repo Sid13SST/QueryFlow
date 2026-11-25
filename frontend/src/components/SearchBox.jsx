@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import axiosClient from '../api/axiosClient';
 
-export default function SearchBox({ trigger }) {
+export default function SearchBox({ trigger, backendReady = true, onUnreachable }) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const isWakingMsg = errorMsg.startsWith('The backend is waking up');
   const [showDropdown, setShowDropdown] = useState(false);
   
   const [isSearching, setIsSearching] = useState(false);
@@ -34,6 +35,13 @@ export default function SearchBox({ trigger }) {
       return;
     }
 
+    if (!backendReady) {
+      setSuggestions([]);
+      setIsLoading(false);
+      setErrorMsg('The backend is waking up. Suggestions will appear in a moment.');
+      return;
+    }
+
     setIsLoading(true);
     setErrorMsg('');
 
@@ -44,7 +52,12 @@ export default function SearchBox({ trigger }) {
         setShowDropdown(true);
       } catch (err) {
         console.error('Error fetching suggestions:', err);
-        setErrorMsg(err.message || 'Error loading suggestions');
+        if (err.unreachable) {
+          if (onUnreachable) onUnreachable();
+          setErrorMsg('The backend is waking up. Suggestions will appear in a moment.');
+        } else {
+          setErrorMsg(err.message || 'Error loading suggestions');
+        }
         setSuggestions([]);
       } finally {
         setIsLoading(false);
@@ -52,7 +65,7 @@ export default function SearchBox({ trigger }) {
     }, 300); // 300ms debounce delay
 
     return () => clearTimeout(delayDebounceFn);
-  }, [query]);
+  }, [query, backendReady]);
 
   // Submit search request
   const submitSearch = async (value) => {
@@ -68,7 +81,8 @@ export default function SearchBox({ trigger }) {
       setTimeout(() => setSearchFeedback(''), 2500); // Clear feedback after 2.5s
     } catch (err) {
       console.error('Error submitting search:', err);
-      setSearchFeedback('Failed to record search');
+      if (err.unreachable && onUnreachable) onUnreachable();
+      setSearchFeedback(err.unreachable ? 'Backend waking up, try again shortly' : 'Failed to record search');
       setTimeout(() => setSearchFeedback(''), 3000);
     } finally {
       setIsSearching(false);
@@ -204,11 +218,11 @@ export default function SearchBox({ trigger }) {
 
           {/* Error State */}
           {errorMsg && (
-            <div className="px-5 py-4 text-sm text-rose-500 bg-rose-500/5 border-t border-slate-800 flex items-center gap-2">
+            <div className={`px-5 py-4 text-sm border-t border-slate-800 flex items-center gap-2 ${isWakingMsg ? 'text-indigo-300 bg-indigo-500/5' : 'text-rose-500 bg-rose-500/5'}`}>
               <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
-              <span className="truncate">{errorMsg}</span>
+              <span className="min-w-0 break-words">{errorMsg}</span>
             </div>
           )}
         </div>
