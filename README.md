@@ -97,6 +97,10 @@ QueryFlow/
 │   └── package.json
 │
 ├── deploy/nginx.conf          # Load balancer config for the cluster
+├── deploy/render/             # Entrypoint for the free Render image
+├── Dockerfile.render          # Single-container image: API + 3 Redis (Render free)
+├── render.yaml                # Render Blueprint (free web service)
+├── DEPLOY.md                  # Free public demo: Neon + Render + Vercel
 ├── scripts/                   # Cluster benchmark & Redis outage drill
 ├── docker-compose.yml         # 3 Redis nodes for local development
 ├── docker-compose.cluster.yml # 2 backends + nginx + PostgreSQL + 3 Redis
@@ -121,6 +125,7 @@ QueryFlow/
 | `GET` | `/trending/explain?query={q}` | Score breakdown for a query |
 | `GET` | `/metrics` | Per-instance metrics incl. cache resilience and rate limiting |
 | `GET` | `/metrics/latency` | Suggestion & trending latency stats |
+| `GET` | `/ratelimit/client` | How the rate limiter identifies the caller, plus active limits |
 | `GET` | `/benchmark/report` | Cache hit rate & write reduction report |
 | `GET` | `/demo/summary` | Combined overview for demos |
 | `GET` | `/cache/stats` | Cache hit/miss counters |
@@ -131,6 +136,12 @@ QueryFlow/
 `/suggest`, `/search` and `/trending/**` are rate limited per client IP; over the limit they return `429 Too Many Requests` with `Retry-After`. Every response carries `X-QueryFlow-Instance`.
 
 See [docs/API.md](docs/API.md) for full request/response examples.
+
+---
+
+## Live Demo Deployment
+
+The whole stack can run publicly for free: React on Vercel, the API with three real Redis nodes in one Render free Docker service, PostgreSQL on Neon. Steps and honest limits (cold start after idle, 0.1 CPU) are in [DEPLOY.md](DEPLOY.md).
 
 ---
 
@@ -202,7 +213,7 @@ cd backend
 ./mvnw test            # Linux / macOS (or: mvn test)
 ```
 
-**74 tests** (73 pass, 1 disabled context test; the baseline was 35, see [BASELINE.md](BASELINE.md)). No PostgreSQL, Redis or Docker is needed: full-context tests use H2 and an in-process fake Redis that can be stopped and started. To run the same tests against a real PostgreSQL:
+**85 tests** (84 pass, 1 disabled context test; the baseline was 35, see [BASELINE.md](BASELINE.md)). No PostgreSQL, Redis or Docker is needed: full-context tests use H2 and an in-process fake Redis that can be stopped and started. To run the same tests against a real PostgreSQL:
 
 ```bash
 QUERYFLOW_TEST_JDBC_URL=jdbc:postgresql://localhost:5432/queryflow_test ./mvnw test
@@ -276,7 +287,7 @@ All settings are externalized in `application.properties` with environment varia
 
 | Property | Default | Description |
 |---|---|---|
-| `server.port` | `8080` | Backend port |
+| `server.port` | `$PORT` / `$SERVER_PORT` / `8080` | Backend port (`PORT` is set by Render) |
 | `queryflow.batch.flush-interval-seconds` | `30` | Batch flush frequency |
 | `queryflow.trending.limit` | `10` | Number of trending results |
 | `queryflow.trending.popularity-weight` | `0.7` | Popularity score weight |
@@ -285,7 +296,9 @@ All settings are externalized in `application.properties` with environment varia
 | `queryflow.trending.cache.ttl-minutes` | `5` | Cache TTL safety net |
 | `queryflow.instance-id` | `$INSTANCE_ID` / hostname | Instance name in `/metrics`, `/health`, `X-QueryFlow-Instance` |
 | `queryflow.rate-limit.enabled` | `true` | Master switch (`RATE_LIMIT_ENABLED`) |
-| `queryflow.rate-limit.trust-forwarded-header` | `false` | Use right-most `X-Forwarded-For` as client IP (`RATE_LIMIT_TRUST_FORWARDED`) |
+| `queryflow.rate-limit.trust-forwarded-header` | `false` | Take the client IP from proxy headers (`RATE_LIMIT_TRUST_FORWARDED`) |
+| `queryflow.rate-limit.trusted-proxy-hops` | `1` | Proxies appending to `X-Forwarded-For`; client = N-th entry from the right (`RATE_LIMIT_TRUSTED_PROXY_HOPS`) |
+| `queryflow.rate-limit.client-ip-header` | _(empty)_ | Edge-set header that wins over `X-Forwarded-For`, e.g. `CF-Connecting-IP` on Render (`RATE_LIMIT_CLIENT_IP_HEADER`) |
 | `queryflow.rate-limit.endpoints.suggest.capacity` / `.refill-per-second` | `30` / `10` | `/suggest` burst / sustained rate |
 | `queryflow.rate-limit.endpoints.search.capacity` / `.refill-per-second` | `10` / `2` | `/search` burst / sustained rate |
 | `queryflow.rate-limit.endpoints.trending.capacity` / `.refill-per-second` | `20` / `5` | `/trending/**` burst / sustained rate |
@@ -298,6 +311,7 @@ All settings are externalized in `application.properties` with environment varia
 
 ## Documentation
 
+* [Free deployment](DEPLOY.md) — Public demo on Neon + Render + Vercel at no cost, with measured limits
 * [Architecture](docs/ARCHITECTURE.md) — System design, diagrams, component details
 * [API Reference](docs/API.md) — Full endpoint documentation
 * [Viva Notes](docs/VIVA_NOTES.md) — Interview Q&A preparation

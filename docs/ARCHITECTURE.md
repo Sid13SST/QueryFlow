@@ -101,7 +101,9 @@ Using TTL alone results in stale suggestions or outdated trending lists for up t
 * Why these defaults: the bundled frontend debounces typeahead by 300 ms, so one person produces at most ~3.3 `/suggest` calls/s. The limits leave room for several people behind one NAT address while stopping scripted floods.
 * Over the limit: **HTTP 429**, `Retry-After: <seconds>` (time until the next token, rounded up), JSON body `{"message","endpoint","retryAfterSeconds"}`. Allowed responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
 * Everything is configuration (`queryflow.rate-limit.*`, or env vars such as `RATE_LIMIT_SUGGEST_CAPACITY`); new groups can be added in properties alone. `RATE_LIMIT_ENABLED=false` turns it off.
-* Behind a proxy set `RATE_LIMIT_TRUST_FORWARDED=true`. The client is then the **right-most** `X-Forwarded-For` entry (the address the proxy itself saw); entries further left are client-supplied and ignored.
+* Behind a proxy set `RATE_LIMIT_TRUST_FORWARDED=true`. The client is then the `X-Forwarded-For` entry `RATE_LIMIT_TRUSTED_PROXY_HOPS` places from the right (default 1: the address the single proxy itself saw); entries further left are client-supplied and ignored. A chain shorter than the hop count falls back to the socket address.
+* Behind an edge that overwrites a single client-address header, set `RATE_LIMIT_CLIENT_IP_HEADER` to it; it wins over `X-Forwarded-For`. On Render, Cloudflare fronts every service and Render's proxy appends the Cloudflare edge address, so the right-most entry is shared by many visitors; the Render blueprint therefore uses `CF-Connecting-IP`, which Cloudflare sets on every request.
+* `GET /ratelimit/client` returns the caller's resolved address, where it came from (`CLIENT_IP_HEADER`, `FORWARDED_FOR`, `REMOTE_ADDR`) and the active limits, to check a deployment's proxy settings.
 * Memory is bounded: idle buckets are swept every minute and the table is capped (`max-tracked-buckets`); past the cap new clients are let through untracked (fail-open) and counted.
 * `/metrics` exposes `rateLimitAllowed`, `rateLimitRejected`, `rateLimitTrackedBuckets` and a per-group breakdown.
 

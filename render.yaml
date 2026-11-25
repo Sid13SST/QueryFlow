@@ -1,0 +1,39 @@
+# Render Blueprint for the QueryFlow backend (free plan).
+# Render dashboard -> New -> Blueprint -> pick this repository. See DEPLOY.md.
+#
+# One free Docker web service runs the Spring Boot API plus three local Redis nodes
+# (Dockerfile.render). PostgreSQL is an external free Neon database.
+services:
+  - type: web
+    name: queryflow-backend
+    runtime: docker
+    plan: free
+    # Keep the service and the Neon database in the same part of the world.
+    # Singapore pairs with Neon's AWS ap-southeast-1; change both together if needed.
+    region: singapore
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # --- Secrets: entered in the Render dashboard on first deploy, never committed ---
+      # JDBC form of the Neon connection string, e.g.
+      #   jdbc:postgresql://ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+      - key: DB_URL
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+
+      # --- Plain settings ---
+      # Render puts Cloudflare in front of every service and its own proxy appends the
+      # Cloudflare edge address to X-Forwarded-For, so per-visitor rate limiting keys on
+      # CF-Connecting-IP, which Cloudflare overwrites on every request.
+      - key: RATE_LIMIT_TRUST_FORWARDED
+        value: "true"
+      - key: RATE_LIMIT_CLIENT_IP_HEADER
+        value: CF-Connecting-IP
+      - key: INSTANCE_ID
+        value: render-free
+      # PORT is provided by Render; the app listens on it (server.port=${PORT:...}).

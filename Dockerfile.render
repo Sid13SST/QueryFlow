@@ -1,0 +1,91 @@
+# syntax=docker/dockerfile:1
+#
+# Single-container image for the free Render web service (512 MB RAM, 0.1 CPU).
+# It runs the Spring Boot backend plus THREE local redis-server processes
+# (127.0.0.1:6379/6380/6381), so the consistent-hash ring, per-node circuit
+# breakers and node failover behave exactly as in the multi-container setup.
+# PostgreSQL is external (e.g. Neon), configured with DB_URL / DB_USERNAME / DB_PASSWORD.
+#
+# Build context: repository root.
+#   docker build -f Dockerfile.render -t queryflow-render .
+#   docker run --rm -p 8080:10000 -e PORT=10000 -e DB_URL=... -e DB_USERNAME=... -e DB_PASSWORD=... queryflow-render
+
+############################
+# 1. Build the jar
+############################
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /build
+
+# Resolve dependencies in their own layer so source-only changes rebuild quickly.
+COPY backend/pom.xml ./pom.xml
+RUN mvn -B -q -e dependency:go-offline
+
+COPY backend/src ./src
+RUN mvn -B -q -e -DskipTests package \
+ && cp target/backend-*.jar /build/queryflow.jar
+
+############################
+# 2. Slim runtime: JRE + redis-server
+############################
+# Pinned to the Ubuntu 26.04 ("resolute") variant: the plain 21-jre tag moved from
+# 24.04 to 26.04, which silently changed redis-server from 7.0 to 8.0.
+FROM eclipse-temurin:21-jre-resolute AS runtime
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends redis-server \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin queryflow \
+ && redis-server --version \
+ && mkdir -p /app/run \
+ && chown -R queryflow /app
+
+WORKDIR /app
+COPY --from=build /build/queryflow.jar /tmp/queryflow.jar
+
+# Class Data Sharing (AppCDS): unpack the jar and record the classes loaded during a
+# training start-up, so real start-ups map them from an archive instead of parsing them.
+# Measured locally under a 0.1 CPU limit: start-up 94 s without the archive, 34 s with it.
+# The training run needs no database or Redis: it stops right after the context refreshes
+# and is told not to touch JDBC metadata, the schema or the dataset.
+RUN java -Djarmode=tools -jar /tmp/queryflow.jar extract --destination /app/app \
+ && rm /tmp/queryflow.jar \
+ && cd /app/app \
+ && java -XX:ArchiveClassesAtExit=/app/app/queryflow.jsa \
+      -Xmx224m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 \
+      -Dspring.context.exit=onRefresh \
+      -Dspring.jpa.hibernate.ddl-auto=none \
+      -Dspring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect \
+      -Dspring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access=false \
+      -Dqueryflow.dataset.load-on-startup=false \
+      -Dspring.datasource.url=jdbc:postgresql://127.0.0.1:1/cds-training \
+      -jar queryflow.jar > /tmp/cds-training.log 2>&1 \
+   || (cat /tmp/cds-training.log; exit 1) \
+ && rm /tmp/cds-training.log \
+ && chown -R queryflow /app
+
+# /app/run: writable fallback for Redis and JVM temp files, used when /tmp is not
+# writable. Nothing is placed under /tmp in the image: Render mounts a fresh /tmp at
+# runtime, which hides it (that is what broke the first deploy).
+COPY deploy/render/entrypoint.sh /app/entrypoint.sh
+RUN chmod 0755 /app/entrypoint.sh \
+ && chown queryflow /app/run && chmod 0755 /app/run
+
+# JVM sized for a 512 MB container shared with 3 small Redis nodes:
+#   heap <= 224 MB, metaspace <= 128 MB, code cache 48 MB, small thread stacks.
+# SerialGC has the lowest footprint for a single (0.1) CPU, C1-only JIT starts faster
+# and uses less memory, and the JVM exits on OOM so Render restarts it cleanly.
+# Override the whole set with JAVA_OPTS if needed.
+# REDIS_COMMAND_TIMEOUT_MS: the local Redis nodes answer in microseconds, but on a 0.1 CPU
+# quota the JVM itself can be descheduled for longer than the 500 ms default, which would
+# trip the circuit breakers without any Redis fault. 2 s keeps them for real failures.
+ENV JAVA_OPTS="-Xms64m -Xmx224m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=32m -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:CICompilerCount=1 -XX:+ExitOnOutOfMemoryError" \
+    REDIS_MAXMEMORY=16mb \
+    SERVER_TOMCAT_THREADS_MAX=32 \
+    REDIS_COMMAND_TIMEOUT_MS=2000 \
+    SERVER_TOMCAT_ACCEPT_COUNT=50 \
+    JPA_SHOW_SQL=false \
+    PORT=10000
+
+USER queryflow
+EXPOSE 10000
+ENTRYPOINT ["/app/entrypoint.sh"]

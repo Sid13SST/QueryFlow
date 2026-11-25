@@ -38,6 +38,20 @@ public class RateLimitProperties {
     /** Header written by the reverse proxy. nginx's $proxy_add_x_forwarded_for appends to X-Forwarded-For. */
     private String forwardedHeader = "X-Forwarded-For";
 
+    /**
+     * How many proxies in front of the backend append to {@link #forwardedHeader}. The client
+     * is the entry this many places from the right. 1 = a single proxy such as the bundled nginx.
+     */
+    private int trustedProxyHops = 1;
+
+    /**
+     * Optional single-value header that the edge proxy always overwrites with the client
+     * address, e.g. {@code CF-Connecting-IP} behind Cloudflare (which fronts Render). When set
+     * and present it wins over {@link #forwardedHeader}. Leave empty unless every request
+     * reaches the backend through that proxy, otherwise clients could choose their own key.
+     */
+    private String clientIpHeader = "";
+
     /** Buckets untouched for this long are dropped (an idle bucket is full anyway, so nothing is lost). */
     private long idleBucketTtlSeconds = 300;
 
